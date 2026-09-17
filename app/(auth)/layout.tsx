@@ -28,7 +28,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             <span className="grid place-items-center size-8 rounded-md bg-amber text-white">
               <Receipt className="size-4" />
             </span>
-            Ledger
+            BillBanao.com
           </Link>
           {children}
         </div>
