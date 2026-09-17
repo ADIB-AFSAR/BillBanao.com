@@ -5,6 +5,28 @@ import { Toaster } from "sonner";
 export const metadata: Metadata = {
   title: "BillBanao.com",
   description: "Business billing, GST invoicing and receipts.",
+  openGraph: {
+    title: "BillBanao.com",
+    description: "Business billing, GST invoicing and receipts.",
+    url: "https://billbanaodotcom.vercel.app",
+    siteName: "BillBanao.com",
+    type: "website",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "BillBanao.com",
+      },
+    ],
+  },
+
+  twitter: {
+    card: "summary_large_image",
+    title: "BillBanao.com",
+    description: "Business billing, GST invoicing and receipts.",
+    images: ["/og-image.png"],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
