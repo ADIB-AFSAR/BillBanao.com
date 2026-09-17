@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "/og-image.png",
+        url: "/billbanao-og-v2.png",
         width: 1200,
         height: 630,
         alt: "BillBanao.com",
@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "BillBanao.com",
     description: "Business billing, GST invoicing and receipts.",
-    images: ["/og-image.png"],
+    images: ["/billbanao-og-v2.png"],
   },
 };
 
