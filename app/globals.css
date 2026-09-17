@@ -1,0 +1,110 @@
+@import "tailwindcss";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
+/*
+  Design language: "the ledger"
+  This is billing software - the visual world it borrows from is paper
+  ledgers, receipts, and stamped ink, not generic SaaS dashboard chrome.
+
+  Color:
+    --ink        #14213D  deep navy - chrome, headings, primary actions
+    --paper      #FBF7F0  warm paper background
+    --paper-line #E7DFD0  hairline rule on paper (like ledger rows)
+    --amber      #C98A2C  stamped-ink accent - the one bold color
+    --moss       #2F6D4F  confirmed / paid / positive
+    --brick      #B23A2E  overdue / destructive
+  Type:
+    IBM Plex Sans - UI text, headings
+    IBM Plex Mono - all monetary figures & invoice numbers (tabular alignment,
+      and it reads like a receipt printer / ledger column)
+*/
+
+:root {
+  --ink: #14213d;
+  --ink-2: #1f2f52;
+  --paper: #fbf7f0;
+  --paper-raised: #ffffff;
+  --paper-line: #e7dfd0;
+  --paper-line-2: #dcd2bd;
+  --amber: #c98a2c;
+  --amber-dark: #a06e1f;
+  --moss: #2f6d4f;
+  --moss-bg: #e7f0ea;
+  --brick: #b23a2e;
+  --brick-bg: #f7e8e6;
+  --slate: #5b6472;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --radius: 0.5rem;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-paper: var(--paper);
+  --color-paper-raised: var(--paper-raised);
+  --color-paper-line: var(--paper-line);
+  --color-paper-line-2: var(--paper-line-2);
+  --color-amber: var(--amber);
+  --color-amber-dark: var(--amber-dark);
+  --color-moss: var(--moss);
+  --color-moss-bg: var(--moss-bg);
+  --color-brick: var(--brick);
+  --color-brick-bg: var(--brick-bg);
+  --color-slate: var(--slate);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+* {
+  border-color: var(--paper-line);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Focus ring - visible, deliberate, not the browser default blue */
+:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+  }
+  .print-receipt {
+    box-shadow: none !important;
+    border: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

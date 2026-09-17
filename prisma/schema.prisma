@@ -1,0 +1,362 @@
+// ---------------------------------------------------------------------------
+// Prisma schema for the billing / POS application.
+//
+// Money design decision:
+//   All monetary values are stored as INTEGERS in the currency's minor unit
+//   (paise for INR: 1 rupee = 100 paise). This sidesteps floating point
+//   rounding errors entirely - every calculation in lib/billing/calculate.ts
+//   works on integers and only converts to a display string at the edge.
+//
+// Quantity design decision:
+//   Quantities can be fractional (0.5 kg, 1.5 hours) so they are stored as
+//   integers scaled by 1000 ("quantityMilli"). 2 pieces -> 2000, 0.5 kg -> 500.
+//
+// GST rate design decision:
+//   Stored as integer "basis points of a percent" (rateBasisPoints), i.e.
+//   the percentage multiplied by 100. 18% -> 1800, 5% -> 500, 2.5% -> 250.
+//   This lets custom fractional GST rates be represented exactly.
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider   = "prisma-client"
+  output     = "../lib/generated/prisma"
+  engineType = "client"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Unit {
+  PIECE
+  KG
+  GRAM
+  LITER
+  METER
+  BOX
+  PACKET
+  DOZEN
+  HOUR
+  SERVICE
+}
+
+enum DiscountType {
+  NONE
+  FIXED
+  PERCENTAGE
+}
+
+enum TaxType {
+  NONE
+  CGST_SGST
+  IGST
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+  OTHER
+}
+
+enum PaymentStatus {
+  PAID
+  PARTIALLY_PAID
+  UNPAID
+}
+
+enum InvoiceStatus {
+  FINAL
+  CANCELLED
+}
+
+enum InventoryTxnType {
+  SALE
+  RETURN
+  ADJUSTMENT
+  RESTOCK
+}
+
+enum UserRole {
+  OWNER
+  STAFF
+}
+
+// ---------------------------------------------------------------------------
+// Tenant / Auth
+// ---------------------------------------------------------------------------
+
+model Business {
+  id        String   @id @default(cuid())
+  name      String
+  ownerName String?
+  address   String?
+  phone     String?
+  email     String?
+  website   String?
+  gstin     String?
+  state     String?
+  city      String?
+  pincode   String?
+  logoUrl   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  settings    BusinessSettings?
+  users       User[]
+  categories  Category[]
+  products    Product[]
+  customers   Customer[]
+  invoices    Invoice[]
+  inventoryTx InventoryTransaction[]
+}
+
+model BusinessSettings {
+  id       String   @id @default(cuid())
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String @unique
+
+  invoicePrefix       String  @default("INV-")
+  invoiceNumberPad    Int     @default(6)
+  nextInvoiceNumber   Int     @default(1)
+  currency            String  @default("INR")
+
+  gstEnabledByDefault Boolean @default(true)
+  pricesIncludeGst    Boolean @default(false)
+  defaultGstRateBasisPoints Int @default(1800)
+
+  billLevelDiscountEnabled Boolean @default(true)
+  itemLevelDiscountEnabled Boolean @default(true)
+  allowManualPriceOverride Boolean @default(false)
+
+  receiptFooter        String? @default("Thank you for your business!")
+  termsAndConditions   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         UserRole @default(OWNER)
+
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+
+  createdAt DateTime @default(now())
+
+  invoicesCreated Invoice[] @relation("InvoiceCreatedBy")
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+
+model Category {
+  id          String  @id @default(cuid())
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId  String
+  name        String
+  description String?
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessId, name])
+}
+
+model Product {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  categoryId String?
+
+  name        String
+  sku         String?
+  barcode     String?
+  description String?
+
+  unitPriceMinor Int   // selling price, in minor currency units
+  costPriceMinor Int?
+  unit           Unit  @default(PIECE)
+
+  gstRateBasisPoints Int @default(0)
+
+  trackStock       Boolean @default(false)
+  stockQty         Int?    @default(0)
+  lowStockThreshold Int?   @default(5)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoiceItems       InvoiceItem[]
+  inventoryTx        InventoryTransaction[]
+
+  @@unique([businessId, sku])
+  @@unique([businessId, barcode])
+  @@index([businessId, name])
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+
+  name    String
+  phone   String?
+  email   String?
+  address String?
+  gstin   String?
+  state   String?
+  city    String?
+  pincode String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoices Invoice[]
+
+  @@index([businessId, name])
+}
+
+// ---------------------------------------------------------------------------
+// Billing
+// ---------------------------------------------------------------------------
+
+model Invoice {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+
+  invoiceNumber String
+  invoiceDate   DateTime @default(now())
+  status        InvoiceStatus @default(FINAL)
+
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerId String?
+
+  // Snapshot of customer/business info at the time of billing, so historical
+  // invoices never change even if the customer or business record changes.
+  customerNameSnapshot String?
+  businessStateSnapshot String?
+  customerStateSnapshot String?
+
+  gstApplied       Boolean @default(false)
+  pricesIncludeGst Boolean @default(false)
+  taxType          TaxType @default(NONE)
+
+  subtotalMinor       Int
+  billDiscountType    DiscountType @default(NONE)
+  billDiscountValue   Int          @default(0)
+  billDiscountMinor   Int          @default(0)
+  taxableAmountMinor  Int
+  cgstMinor           Int @default(0)
+  sgstMinor           Int @default(0)
+  igstMinor           Int @default(0)
+  gstTotalMinor       Int @default(0)
+  roundOffMinor       Int @default(0)
+  grandTotalMinor     Int
+
+  paymentMethod PaymentMethod @default(CASH)
+  paymentStatus PaymentStatus @default(PAID)
+  amountPaidMinor Int @default(0)
+  amountDueMinor  Int @default(0)
+  changeMinor     Int @default(0)
+
+  notes String?
+
+  createdBy   User?   @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items       InvoiceItem[]
+  payments    Payment[]
+  inventoryTx InventoryTransaction[]
+
+  @@unique([businessId, invoiceNumber])
+  @@index([businessId, invoiceDate])
+}
+
+model InvoiceItem {
+  id        String  @id @default(cuid())
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String
+
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productId String?
+
+  // Snapshot fields: the invoice must never change if the product changes later.
+  productNameSnapshot String
+  skuSnapshot         String?
+  unitSnapshot        Unit    @default(PIECE)
+
+  unitPriceMinor Int
+  quantityMilli  Int // quantity * 1000, supports fractional units
+
+  lineDiscountType  DiscountType @default(NONE)
+  lineDiscountValue Int          @default(0)
+  lineDiscountMinor Int          @default(0)
+
+  taxableAmountMinor Int
+  gstRateBasisPoints Int @default(0)
+  cgstMinor          Int @default(0)
+  sgstMinor          Int @default(0)
+  igstMinor          Int @default(0)
+  lineTotalMinor     Int
+
+  sortOrder Int @default(0)
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  invoice   Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId String
+  method    PaymentMethod
+  amountMinor Int
+  reference String?
+  paidAt    DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Inventory
+// ---------------------------------------------------------------------------
+
+model InventoryTransaction {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+
+  type            InventoryTxnType
+  quantityChange  Int // positive = stock added, negative = stock removed
+  resultingStock  Int
+  reason          String?
+
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  invoiceId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([businessId, productId])
+}
