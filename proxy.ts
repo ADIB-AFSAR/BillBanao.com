@@ -37,5 +37,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|icon.svg|billbanao-og-image-v3.png).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|icon.svg|billbanao-og-image-v4.jpg).*)"],
 };
