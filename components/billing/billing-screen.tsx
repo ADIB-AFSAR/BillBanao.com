@@ -53,6 +53,7 @@ export function BillingScreen({
   prefillItems?: CartItem[];
 }) {
   const router = useRouter();
+  const [summaryHeight, setSummaryHeight] = useState(370);
   const [cart, setCart] = useState<CartItem[]>(prefillItems ?? []);
   const [customer, setCustomer] = useState<BillingCustomer | null>(null);
   const [gstEnabled, setGstEnabled] = useState(settings.gstEnabledByDefault);
@@ -70,6 +71,34 @@ export function BillingScreen({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleSummaryDragStart(e: React.PointerEvent<HTMLDivElement>) {
+  e.currentTarget.setPointerCapture(e.pointerId);
+
+  const startY = e.clientY;
+  const startHeight = summaryHeight;
+
+  const handleMove = (event: PointerEvent) => {
+    // Dragging down makes summary smaller.
+    // Dragging up makes summary larger.
+    const delta = event.clientY - startY;
+
+    const nextHeight = Math.min(
+      520,
+      Math.max(260, startHeight - delta)
+    );
+
+    setSummaryHeight(nextHeight);
+  };
+
+  const handleUp = () => {
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", handleUp);
+  };
+
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", handleUp);
+}
 
   function addProduct(p: BillingProduct) {
     setCart((prev) => {
@@ -216,7 +245,21 @@ export function BillingScreen({
           )}
         </div>
 
-        <div className="border-t border-paper-line px-4 sm:px-5 py-3 space-y-3 bg-paper">
+         <div
+    onPointerDown={handleSummaryDragStart}
+    className="h-6 shrink-0 border-t border-paper-line bg-paper flex items-center justify-center cursor-row-resize touch-none"
+    aria-label="Resize bill summary"
+    role="separator"
+    aria-orientation="horizontal"
+  >
+    <div className="w-10 h-1 rounded-full bg-slate/40" />
+  </div>
+
+  {/* Checkout summary */}
+  <div
+    className="shrink-0 overflow-y-auto px-4 sm:px-5 py-3 space-y-3 bg-paper"
+    style={{ height: summaryHeight }}
+  >
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-2 text-sm font-medium text-ink cursor-pointer">
               <span

@@ -76,6 +76,7 @@ function LoginForm() {
           Create one
         </Link>
       </p>
+      <p className="text-xs text-grey" style={{fontStyle:"italic",color:"grey"}}>we are still under development, report <span style={{textDecoration:"underline"}}><a href="mailto:afsaradib786@gmail.com"><u>us</u></a></span> if you find any bug : ) </p>
     </div>
   );
 }
