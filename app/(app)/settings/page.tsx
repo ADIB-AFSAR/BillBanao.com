@@ -1,10 +1,25 @@
 import { redirect } from "next/navigation";
 import { getBusinessAction } from "@/lib/actions/business";
+import { getSession } from "@/lib/auth/session";
 import { SettingsTabs } from "@/components/settings/settings-tabs";
+import { RestrictedNotice } from "@/components/layout/restricted-notice";
+import { DataUnavailable } from "@/components/layout/data-unavailable";
 
 export default async function SettingsPage() {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  if (session.role !== "OWNER") {
+    return (
+      <div className="p-4 sm:p-8">
+        <RestrictedNotice message="Only the business owner can change business profile and invoice settings." />
+      </div>
+    );
+  }
+
   const result = await getBusinessAction();
-  if (!result.ok) redirect("/login");
+  if (!result.ok) {
+    return <DataUnavailable message="Couldn't load your business settings right now." retryHref="/settings" />;
+  }
   const business = result.data;
   const settings = business.settings;
   if (!settings) redirect("/business/setup");

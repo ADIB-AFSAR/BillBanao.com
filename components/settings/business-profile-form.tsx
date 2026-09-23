@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { businessProfileSchema, type BusinessProfileInput } from "@/schemas/common";
 import { updateBusinessProfileAction } from "@/lib/actions/business";
@@ -27,6 +28,7 @@ export function BusinessProfileForm({
   submitLabel?: string;
 }) {
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
   const {
     register,
     handleSubmit,
@@ -45,6 +47,7 @@ export function BusinessProfileForm({
       return;
     }
     toast.success("Business details saved.");
+    router.refresh();
     onSaved?.();
   }
 

@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NavLink } from "./nav-link";
 import {
   LayoutDashboard,
   Receipt,
@@ -11,20 +11,42 @@ import {
   Users,
   History,
   Settings,
+  Sparkles,
+  UserCog,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/products", label: "Products", icon: Package },
-  { href: "/categories", label: "Categories", icon: Tags },
-  { href: "/customers", label: "Customers", icon: Users },
-  { href: "/invoices", label: "Invoice History", icon: History },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
+interface NavItem {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  hidden?: boolean;
+}
 
-export function Sidebar({ businessName }: { businessName: string }) {
+function buildNavItems(role: "OWNER" | "STAFF", canViewInvoiceHistory: boolean): NavItem[] {
+  return [
+    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/products", label: "Products", icon: Package },
+    { href: "/categories", label: "Categories", icon: Tags },
+    { href: "/customers", label: "Customers", icon: Users },
+    { href: "/invoices", label: "Invoice History", icon: History, hidden: !canViewInvoiceHistory },
+    { href: "/plans", label: "Plans & Billing", icon: Sparkles },
+    { href: "/team", label: "Team", icon: UserCog, hidden: role !== "OWNER" },
+    { href: "/settings", label: "Settings", icon: Settings, hidden: role !== "OWNER" },
+  ].filter((item) => !item.hidden);
+}
+
+export function Sidebar({
+  businessName,
+  role,
+  canViewInvoiceHistory,
+}: {
+  businessName: string;
+  role: "OWNER" | "STAFF";
+  canViewInvoiceHistory: boolean;
+}) {
   const pathname = usePathname();
+  const navItems = buildNavItems(role, canViewInvoiceHistory);
 
   return (
     <aside className="hidden lg:flex w-60 shrink-0 flex-col bg-ink text-paper h-screen sticky top-0 no-print">
@@ -39,21 +61,21 @@ export function Sidebar({ businessName }: { businessName: string }) {
       </div>
 
       <div className="px-3 pt-4">
-        <Link
+        <NavLink
           href="/billing"
           className="flex items-center gap-2 rounded-md bg-amber hover:bg-amber-dark text-white font-medium text-sm px-3 py-2.5 transition-colors shadow-sm"
         >
           <PlusCircle className="size-4" />
           New Bill
-        </Link>
+        </NavLink>
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + "/");
           const Icon = item.icon;
           return (
-            <Link
+            <NavLink
               key={item.href}
               href={item.href}
               className={cn(
@@ -63,13 +85,13 @@ export function Sidebar({ businessName }: { businessName: string }) {
             >
               <Icon className="size-4" />
               {item.label}
-            </Link>
+            </NavLink>
           );
         })}
       </nav>
 
       <div className="px-5 py-4 border-t border-white/10 text-[11px] text-paper/40">
-        BillBanao.com · v1.0
+        Ledger Billing · v1.0
       </div>
     </aside>
   );

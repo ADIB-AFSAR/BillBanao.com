@@ -35,6 +35,14 @@ export async function runAction<T>(fn: () => Promise<T>): Promise<ActionResult<T
       if (err.message === "UNAUTHORIZED") {
         return actionError("You need to sign in to do that.");
       }
+      if (err.message === "SUBSCRIPTION_INACTIVE") {
+        return actionError(
+          "This account's access is currently paused. Please contact the platform owner to resume."
+        );
+      }
+      if (err.message === "PERMISSION_DENIED") {
+        return actionError("Your account doesn't have permission to do that. Ask the business owner to grant it.");
+      }
       if (err.message === "FORBIDDEN") {
         return actionError("You don't have access to that resource.");
       }

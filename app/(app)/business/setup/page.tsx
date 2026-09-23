@@ -1,11 +1,20 @@
 import { redirect } from "next/navigation";
+import { getSession } from "@/lib/auth/session";
 import { getBusinessAction } from "@/lib/actions/business";
 import { SetupForm } from "@/components/settings/setup-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/primitives";
+import { DataUnavailable } from "@/components/layout/data-unavailable";
 
 export default async function BusinessSetupPage() {
+  const session = await getSession();
+  if (!session) redirect("/login");
+
   const result = await getBusinessAction();
-  if (!result.ok) redirect("/login");
+  if (!result.ok) {
+    return (
+      <DataUnavailable message="Couldn't load your business details right now." retryHref="/business/setup" />
+    );
+  }
   const business = result.data;
 
   return (

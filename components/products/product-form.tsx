@@ -12,10 +12,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Select, Textarea } from "@/components/ui/primitives";
 import { UNIT_LABELS, GST_RATE_PRESETS } from "@/lib/money";
+import { flattenCategoryTree, indentLabel } from "@/lib/category-tree";
 
 interface CategoryOption {
   id: string;
   name: string;
+  parentId: string | null;
 }
 
 export function ProductForm({
@@ -93,9 +95,9 @@ export function ProductForm({
           <Label htmlFor="categoryId">Category</Label>
           <Select id="categoryId" {...register("categoryId")}>
             <option value="">No category</option>
-            {categories.map((c) => (
+            {flattenCategoryTree(categories).map(({ category: c, depth }) => (
               <option key={c.id} value={c.id}>
-                {c.name}
+                {indentLabel(c.name, depth)}
               </option>
             ))}
           </Select>

@@ -12,14 +12,18 @@ export const Label = React.forwardRef<HTMLLabelElement, React.LabelHTMLAttribute
 );
 Label.displayName = "Label";
 
-export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
-  ({ className, ...props }, ref) => (
+export const Textarea = React.forwardRef<
+  HTMLTextAreaElement,
+  React.TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean }
+>(
+  ({ className, invalid, ...props }, ref) => (
     <textarea
       ref={ref}
       className={cn(
         "flex min-h-[80px] w-full rounded-md border border-paper-line-2 bg-paper-raised px-3 py-2 text-sm text-ink placeholder:text-slate/60",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber/40 focus-visible:border-amber",
         "disabled:cursor-not-allowed disabled:opacity-50",
+        invalid && "border-brick focus-visible:ring-brick/30 focus-visible:border-brick",
         className
       )}
       {...props}

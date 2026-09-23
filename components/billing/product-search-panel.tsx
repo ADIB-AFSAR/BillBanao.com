@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Search, Plus, ScanBarcode } from "lucide-react";
+import { Search, Plus, ScanBarcode, WifiOff } from "lucide-react";
 import { searchProductsForBillingAction } from "@/lib/actions/products";
 import { Input } from "@/components/ui/input";
 import { formatMoney, UNIT_LABELS } from "@/lib/money";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { searchCachedProducts } from "@/lib/offline/cache";
 
 export interface BillingProduct {
   id: string;
@@ -20,24 +21,52 @@ export interface BillingProduct {
   category: { name: string } | null;
 }
 
-export function ProductSearchPanel({ onAdd }: { onAdd: (product: BillingProduct) => void }) {
+export function ProductSearchPanel({
+  businessId,
+  onAdd,
+}: {
+  businessId: string;
+  onAdd: (product: BillingProduct) => void;
+}) {
   const [query, setQuery] = useState("");
   const debounced = useDebouncedValue(query, 150);
   const [results, setResults] = useState<BillingProduct[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fromCache, setFromCache] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional debounced search-on-change
     setLoading(true);
-    searchProductsForBillingAction(debounced).then((res) => {
-      if (res.ok) setResults(res.data as unknown as BillingProduct[]);
-      setLoading(false);
-    });
-  }, [debounced]);
+
+    searchProductsForBillingAction(debounced)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          setResults(res.data as unknown as BillingProduct[]);
+          setFromCache(false);
+        }
+        setLoading(false);
+      })
+      .catch(async () => {
+        // The request never reached the server (offline/flaky connection) -
+        // fall back to whatever was cached the last time we were online.
+        if (cancelled) return;
+        const cached = await searchCachedProducts(businessId, debounced);
+        if (cancelled) return;
+        setResults(cached as unknown as BillingProduct[]);
+        setFromCache(true);
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debounced, businessId]);
 
   return (
     <div>
-      <div className="relative mb-4">
+      <div className="relative mb-2">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate" />
         <Input
           autoFocus
@@ -48,6 +77,12 @@ export function ProductSearchPanel({ onAdd }: { onAdd: (product: BillingProduct)
         />
         <ScanBarcode className="absolute right-3 top-1/2 -translate-y-1/2 size-4 text-slate/50" />
       </div>
+
+      {fromCache && (
+        <p className="flex items-center gap-1.5 text-xs text-amber-dark mb-2">
+          <WifiOff className="size-3.5" /> Showing saved products - prices/stock may be a little out of date.
+        </p>
+      )}
 
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

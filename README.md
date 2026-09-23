@@ -281,7 +281,40 @@ See `.env.example`. Summary:
   screens), loading/empty/error states, toast notifications, confirm
   dialogs before destructive actions
 
-## 9. Known limitations / good next steps
+## 9. Offline billing
+
+The billing screen keeps working when the connection drops mid-sale:
+
+- Products and customers are cached in the browser (IndexedDB) whenever the
+  billing screen loads with a connection, so search still works offline.
+- If checkout can't reach the server, the bill is saved locally instead of
+  failing, a receipt renders immediately from the same calculation engine
+  used online, and it's queued for sync - see `lib/offline/outbox.ts`.
+- Queued bills sync automatically the moment the browser reconnects (and are
+  retried periodically as a fallback), strictly in the order they were
+  billed, and are idempotent: a retried sync can never create a duplicate
+  invoice even if a previous attempt's response was lost mid-flight
+  (`Invoice.idempotencyKey`, checked before every insert).
+- A floating indicator (bottom-right) shows pending/syncing state anywhere
+  in the app; Invoice History also lists anything still queued, with retry/
+  discard for a bill the server genuinely rejected (e.g. stock ran out
+  before it synced) - distinct from a bill still waiting for a connection.
+
+**Real, disclosed limits**, not bugs:
+- Stock and plan-usage limits (`maxCustomers`, `maxInvoicesPerMonth`) can't
+  be enforced while offline - they're re-checked for real at sync time, so
+  a queued sale can occasionally be rejected on sync (shown clearly, never
+  silently dropped).
+- Two different devices selling offline at the same time can both "sell"
+  the last unit of a low-stock item - the local stock cache only prevents
+  oversell on the *same* device.
+- The app shell itself (this page's JS/CSS) still needs to have loaded once
+  while online before it can be reached with no network at all. Making the
+  page itself installable/offline-launchable (a PWA service worker) is a
+  natural next step but is a separate piece of work from the sync engine
+  above.
+
+## 10. Known limitations / good next steps
 
 - **Stock is whole-unit only.** `Product.stockQty` is an integer, so a sale
   of a fractional quantity (e.g. `1.5 kg`) is rounded to the nearest whole

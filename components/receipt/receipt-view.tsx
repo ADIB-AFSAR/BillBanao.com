@@ -72,7 +72,6 @@ export function ReceiptView({ invoice }: { invoice: ReceiptData }) {
 
   return (
     <div className="print-receipt mx-auto max-w-2xl bg-white text-ink border border-paper-line rounded-lg shadow-sm p-6 sm:p-10 print:shadow-none print:border-0 print:max-w-none">
-      <h2 className="text-center mt-0 pt-0 font-semibold text-slate">BillBanao.com</h2>
       <div className="flex items-start justify-between gap-4 pb-4 border-b-2 border-dashed border-paper-line-2">
         <div>
           {invoice.business.logoUrl && (

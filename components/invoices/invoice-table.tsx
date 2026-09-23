@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Search, FileText, Eye, Printer, Copy } from "lucide-react";
+import { Search, FileText, Eye, Printer, Copy, FileDown, Lock } from "lucide-react";
 import { listInvoicesAction, type InvoiceListParams } from "@/lib/actions/invoices";
 import { Input } from "@/components/ui/input";
 import { Select, Badge } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
+import { OfflineListNotice, OfflineStaleBanner } from "@/components/layout/offline-list-notice";
 import { formatMoney } from "@/lib/money";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useRouter } from "next/navigation";
+import { generateSalesReportPdf } from "@/lib/reports/generate-sales-pdf";
+import { toast } from "sonner";
 
 type Invoice = {
   id: string;
@@ -28,10 +31,17 @@ const STATUS_VARIANT: Record<string, "moss" | "amber" | "brick"> = {
   UNPAID: "brick",
 };
 
-export function InvoiceTable() {
+export function InvoiceTable({
+  canExportPdf = false,
+  businessName = "Business",
+}: {
+  canExportPdf?: boolean;
+  businessName?: string;
+}) {
   const router = useRouter();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [offline, setOffline] = useState(false);
   const [search, setSearch] = useState("");
   const debounced = useDebouncedValue(search, 250);
   const [status, setStatus] = useState<InvoiceListParams["paymentStatus"] | "">("");
@@ -40,20 +50,52 @@ export function InvoiceTable() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await listInvoicesAction({
-      search: debounced,
-      paymentStatus: status || undefined,
-      dateFrom: dateFrom || undefined,
-      dateTo: dateTo || undefined,
-    });
-    if (res.ok) setInvoices(res.data as unknown as Invoice[]);
-    setLoading(false);
+    try {
+      const res = await listInvoicesAction({
+        search: debounced,
+        paymentStatus: status || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+      });
+      if (res.ok) setInvoices(res.data as unknown as Invoice[]);
+      setOffline(false);
+    } catch {
+      setOffline(true);
+    } finally {
+      setLoading(false);
+    }
   }, [debounced, status, dateFrom, dateTo]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-filter-change
     load();
   }, [load]);
+
+  useEffect(() => {
+    window.addEventListener("online", load);
+    return () => window.removeEventListener("online", load);
+  }, [load]);
+
+  function handleExportPdf() {
+    if (!canExportPdf) {
+      toast.error("PDF export is a paid-plan feature. Visit Plans & Billing to upgrade.");
+      return;
+    }
+    if (invoices.length === 0) {
+      toast.error("Nothing to export for the current filters.");
+      return;
+    }
+    generateSalesReportPdf(
+      businessName,
+      invoices.map((inv) => ({
+        invoiceNumber: inv.invoiceNumber,
+        invoiceDate: inv.invoiceDate,
+        customerName: inv.customer?.name ?? inv.customerNameSnapshot ?? "Walk-in",
+        grandTotalMinor: inv.grandTotalMinor,
+        paymentStatus: inv.paymentStatus,
+      }))
+    );
+  }
 
   return (
     <div>
@@ -75,17 +117,29 @@ export function InvoiceTable() {
         </Select>
         <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="sm:w-40" />
         <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="sm:w-40" />
+        <Button variant="outline" onClick={handleExportPdf} title={canExportPdf ? "Export PDF" : "Upgrade to export PDF"}>
+          {canExportPdf ? <FileDown className="size-4" /> : <Lock className="size-4" />}
+          Export PDF
+        </Button>
       </div>
 
       <div className="rounded-lg border border-paper-line bg-paper-raised overflow-hidden">
-        {loading ? (
+        {loading && invoices.length === 0 ? (
           <div className="p-10 text-center text-sm text-slate">Loading invoices…</div>
+        ) : offline && invoices.length === 0 ? (
+          <OfflineListNotice label="Can't reach the server to load invoices." onRetry={load} />
         ) : invoices.length === 0 ? (
           <div className="p-10 text-center">
             <FileText className="size-8 text-slate/50 mx-auto mb-2" />
             <p className="text-sm text-slate">No invoices found.</p>
           </div>
         ) : (
+          <>
+            {offline && (
+              <div className="p-3 pb-0">
+                <OfflineStaleBanner />
+              </div>
+            )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -144,6 +198,7 @@ export function InvoiceTable() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
     </div>

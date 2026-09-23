@@ -89,6 +89,12 @@ enum UserRole {
   STAFF
 }
 
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+}
 // ---------------------------------------------------------------------------
 // Tenant / Auth
 // ---------------------------------------------------------------------------
@@ -107,16 +113,41 @@ model Business {
   pincode   String?
   logoUrl   String?
 
+  // --- Platform billing (manual, admin-controlled; no payment gateway) ---
+  // The platform admin flips this by hand when a business pays offline.
+  // TRIALING and ACTIVE both allow normal use of the app; PAST_DUE and
+  // SUSPENDED block it. A TRIALING business also loses access automatically
+  // once trialEndsAt passes, unless the admin has moved it to ACTIVE.
+  // See lib/subscription.ts for the single source of truth on this logic.
+  subscriptionStatus SubscriptionStatus @default(TRIALING)
+  trialEndsAt        DateTime? // set at registration from PlatformSettings.trialDurationDays
+  paidUntil          DateTime? // informational only - admin's own record of what's been paid for
+  adminNotes         String? // private notes visible only to the platform admin
+
+  // Assigned plan is always a *selection* from the admin's Plan list, never
+  // free text - see lib/actions/admin-plans.ts. A business can be on no
+  // plan at all while trialing.
+  plan   Plan?   @relation("BusinessPlan", fields: [planId], references: [id], onDelete: SetNull)
+  planId String?
+
+  // An owner can express interest in a plan from the app; the admin then
+  // approves it by hand (still no payment gateway). See lib/actions/plans.ts.
+  requestedPlan   Plan?     @relation("BusinessRequestedPlan", fields: [requestedPlanId], references: [id], onDelete: SetNull)
+  requestedPlanId String?
+  requestedAt     DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  settings    BusinessSettings?
-  users       User[]
-  categories  Category[]
-  products    Product[]
-  customers   Customer[]
-  invoices    Invoice[]
-  inventoryTx InventoryTransaction[]
+  settings      BusinessSettings?
+  users         User[]
+  categories    Category[]
+  products      Product[]
+  customers     Customer[]
+  invoices      Invoice[]
+  inventoryTx   InventoryTransaction[]
+  sessions      UserSession[]
+  notifViews    NotificationView[]
 }
 
 model BusinessSettings {
@@ -150,6 +181,20 @@ model User {
   passwordHash String
   name         String
   role         UserRole @default(OWNER)
+  isActive     Boolean  @default(true) // owner can revoke a staff login without deleting their invoice history
+
+  // --- Staff permissions ---------------------------------------------
+  // Ignored for OWNER (an owner always has full access - see
+  // lib/auth/permissions.ts). Only meaningful for STAFF, and only the
+  // owner can change them (lib/actions/team.ts). "Manage" means
+  // create/edit/delete; everyone can still search products at the
+  // billing screen and view a specific invoice/receipt regardless of
+  // these flags - they gate the management screens, not day-to-day billing.
+  canViewAnalytics      Boolean @default(false) // dashboard revenue/sales-trend figures
+  canManageProducts     Boolean @default(true)
+  canManageCustomers    Boolean @default(true)
+  canManageCategories   Boolean @default(true)
+  canViewInvoiceHistory Boolean @default(true)
 
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   businessId String
@@ -157,6 +202,118 @@ model User {
   createdAt DateTime @default(now())
 
   invoicesCreated Invoice[] @relation("InvoiceCreatedBy")
+  sessions        UserSession[]
+}
+
+// ---------------------------------------------------------------------------
+// Platform admin (you, running this as a service) - entirely separate from
+// business Users. Has its own login, its own session cookie, and can see
+// every business across all tenants: something a business User must never
+// be able to do. See lib/auth/admin-session.ts and lib/actions/admin.ts.
+// ---------------------------------------------------------------------------
+
+model PlatformAdmin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+}
+
+// One-row table of platform-wide defaults the admin controls.
+// (Enforced as a singleton in application code, not the DB - see
+// lib/actions/admin-settings.ts, which always reads/creates id "singleton".)
+model PlatformSettings {
+  id                String @id @default("singleton")
+  trialDurationDays Int    @default(30)
+  updatedAt         DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Plans - admin-defined, owner-selectable (never free text). Each plan is a
+// price label plus a set of feature checkboxes and usage limits that are
+// actually enforced (see lib/actions/customers.ts, invoices.ts, auth.ts).
+// ---------------------------------------------------------------------------
+
+model Plan {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  priceLabel  String // free text display only, e.g. "₹999/month" - billing itself stays manual
+  description String?
+
+  // null = unlimited for every limit below.
+  maxCustomers        Int?
+  maxInvoicesPerMonth Int?
+  maxConcurrentLogins Int?
+
+  canExportPdf Boolean @default(false)
+
+  isActive  Boolean @default(true) // retire a plan without deleting history
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  currentFor   Business[] @relation("BusinessPlan")
+  requestedFor Business[] @relation("BusinessRequestedPlan")
+}
+
+// ---------------------------------------------------------------------------
+// Admin-triggered announcements shown to owners (e.g. "upgrade for 20% off").
+// Capped per-business view count and dismissible - see
+// components/notifications/notification-banner.tsx.
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id                  String  @id @default(cuid())
+  title               String
+  body                String
+  ctaLabel            String  @default("View plans")
+  ctaHref             String  @default("/plans")
+  isActive            Boolean @default(true)
+  maxViewsPerBusiness Int? // null = unlimited views until dismissed
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  views NotificationView[]
+}
+
+model NotificationView {
+  id             String       @id @default(cuid())
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  notificationId String
+  business       Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId     String
+
+  viewCount    Int       @default(0)
+  lastViewedAt DateTime?
+  dismissedAt  DateTime?
+
+  @@unique([notificationId, businessId])
+}
+
+// ---------------------------------------------------------------------------
+// Lightweight session ledger, used only to enforce Plan.maxConcurrentLogins.
+// The app's actual auth stays a stateless signed JWT cookie (see
+// lib/auth/session.ts) - this table doesn't gate every request, only login
+// (to count) and logout (to release), which keeps normal request latency
+// unaffected. A stale/never-logged-out session still self-expires with
+// expiresAt, so a lost device eventually frees its slot on its own.
+// ---------------------------------------------------------------------------
+
+model UserSession {
+  id         String   @id @default(cuid())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  @@index([businessId, revokedAt, expiresAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -164,18 +321,29 @@ model User {
 // ---------------------------------------------------------------------------
 
 model Category {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   businessId  String
   name        String
   description String?
+
+  // Self-referential tree so a business can go as deep as it needs -
+  // "Grocery" might stop at one level, while "Clothing" might nest
+  // Ladies -> Suits -> Cotton. onDelete: Restrict at the DB level is a
+  // last-resort safety net; the app itself blocks deleting a category with
+  // children and asks the user to reassign or delete them first (see
+  // lib/actions/categories.ts).
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  parentId String?
+  children Category[] @relation("CategoryTree")
 
   products Product[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([businessId, name])
+  @@unique([businessId, parentId, name])
+  @@index([businessId, parentId])
 }
 
 model Product {
@@ -249,6 +417,13 @@ model Invoice {
   invoiceDate   DateTime @default(now())
   status        InvoiceStatus @default(FINAL)
 
+  // Set by the client when a bill is created offline and queued for later
+  // sync (see lib/offline/outbox.ts). Lets a retried sync - e.g. the network
+  // drops right after the server commits but before the client sees the
+  // response - be a safe no-op instead of creating a duplicate invoice.
+  // Online-created invoices simply don't set this.
+  idempotencyKey String?
+
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
   customerId String?
 
@@ -293,6 +468,7 @@ model Invoice {
   inventoryTx InventoryTransaction[]
 
   @@unique([businessId, invoiceNumber])
+  @@unique([businessId, idempotencyKey])
   @@index([businessId, invoiceDate])
 }
 

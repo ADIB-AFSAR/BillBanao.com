@@ -3,16 +3,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ShoppingCart, Receipt } from "lucide-react";
+import { ShoppingCart, Receipt, WifiOff, X, Printer } from "lucide-react";
 import { calculateInvoiceTotals } from "@/lib/billing/calculate";
 import type { Discount, InvoiceLineInput, TaxType } from "@/lib/billing/types";
 import { formatMoney, toMilliQty } from "@/lib/money";
-import { createInvoiceAction } from "@/lib/actions/invoices";
+import type { CreateInvoiceInput } from "@/schemas/invoice";
+import { listAllProductsForCacheAction } from "@/lib/actions/products";
+import { listAllCustomersForCacheAction } from "@/lib/actions/customers";
 import { ProductSearchPanel, type BillingProduct } from "./product-search-panel";
 import { CartRow } from "./cart-row";
 import { CustomerPicker, type BillingCustomer } from "./customer-picker";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/primitives";
+import { ReceiptView, type ReceiptData } from "@/components/receipt/receipt-view";
+import { useOnlineStatus } from "@/hooks/use-online-status";
+import { createInvoiceOnlineOrQueue } from "@/lib/offline/outbox";
+import { warmProductCache, warmCustomerCache, saveCachedBusinessInfo, decrementCachedStock } from "@/lib/offline/cache";
+import type { CachedBusinessInfo } from "@/lib/offline/db";
 
 export interface CartItem {
   key: string;
@@ -44,16 +51,20 @@ const PAYMENT_METHODS = [
 ] as const;
 
 export function BillingScreen({
+  businessId,
+  businessInfo,
   settings,
   businessState,
   prefillItems,
 }: {
+  businessId: string;
+  businessInfo: CachedBusinessInfo;
   settings: BillingSettings;
   businessState: string | null;
   prefillItems?: CartItem[];
 }) {
   const router = useRouter();
-  const [summaryHeight, setSummaryHeight] = useState(370);
+  const online = useOnlineStatus();
   const [cart, setCart] = useState<CartItem[]>(prefillItems ?? []);
   const [customer, setCustomer] = useState<BillingCustomer | null>(null);
   const [gstEnabled, setGstEnabled] = useState(settings.gstEnabledByDefault);
@@ -64,6 +75,7 @@ export function BillingScreen({
   const [amountPaidTouched, setAmountPaidTouched] = useState(false);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [offlineReceipt, setOfflineReceipt] = useState<ReceiptData | null>(null);
 
   useEffect(() => {
     if (prefillItems && prefillItems.length > 0) {
@@ -72,33 +84,31 @@ export function BillingScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function handleSummaryDragStart(e: React.PointerEvent<HTMLDivElement>) {
-  e.currentTarget.setPointerCapture(e.pointerId);
-
-  const startY = e.clientY;
-  const startHeight = summaryHeight;
-
-  const handleMove = (event: PointerEvent) => {
-    // Dragging down makes summary smaller.
-    // Dragging up makes summary larger.
-    const delta = event.clientY - startY;
-
-    const nextHeight = Math.min(
-      520,
-      Math.max(260, startHeight - delta)
-    );
-
-    setSummaryHeight(nextHeight);
-  };
-
-  const handleUp = () => {
-    window.removeEventListener("pointermove", handleMove);
-    window.removeEventListener("pointerup", handleUp);
-  };
-
-  window.addEventListener("pointermove", handleMove);
-  window.addEventListener("pointerup", handleUp);
-}
+  // Warm the offline cache in the background whenever the billing screen
+  // loads with a connection - this is what makes product search and
+  // customer lookup keep working later if the connection drops mid-shift.
+  useEffect(() => {
+    if (!navigator.onLine) return;
+    let cancelled = false;
+    (async () => {
+      const [products, customers] = await Promise.all([
+        listAllProductsForCacheAction(),
+        listAllCustomersForCacheAction(),
+      ]);
+      if (cancelled) return;
+      if (products.ok) await warmProductCache(businessId, products.data as unknown as never[]);
+      if (customers.ok) await warmCustomerCache(businessId, customers.data as unknown as never[]);
+      // businessInfo is a prop, not something this effect fetched - if the
+      // page's own server-side business lookup failed (DB hiccup) it will
+      // be the blank fallback, and saving that here would overwrite a
+      // perfectly good cached copy from an earlier, successful visit.
+      if (businessInfo.name) await saveCachedBusinessInfo(businessId, businessInfo);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessId]);
 
   function addProduct(p: BillingProduct) {
     setCart((prev) => {
@@ -176,10 +186,70 @@ export function BillingScreen({
 
   const effectiveAmountPaidDisplay = amountPaidTouched ? amountPaidInput : (totals.grandTotalMinor / 100).toFixed(2);
 
+  function buildReceiptSnapshot(clientInvoiceLabel: string): ReceiptData {
+    return {
+      invoiceNumber: clientInvoiceLabel,
+      invoiceDate: new Date(),
+      customerNameSnapshot: customer?.name ?? "Walk-in Customer",
+      gstApplied: gstEnabled,
+      taxType,
+      subtotalMinor: totals.subtotalMinor,
+      billDiscountMinor: totals.billDiscountMinor,
+      taxableAmountMinor: totals.taxableAmountMinor,
+      cgstMinor: totals.cgstMinor,
+      sgstMinor: totals.sgstMinor,
+      igstMinor: totals.igstMinor,
+      gstTotalMinor: totals.gstTotalMinor,
+      roundOffMinor: totals.roundOffMinor,
+      grandTotalMinor: totals.grandTotalMinor,
+      paymentMethod,
+      paymentStatus: totals.paymentStatus,
+      amountPaidMinor: totals.amountPaidMinor,
+      amountDueMinor: totals.amountDueMinor,
+      changeMinor: totals.changeMinor,
+      notes: notes || null,
+      items: totals.lines.map((line, idx) => ({
+        productNameSnapshot: cart[idx]?.name ?? "Item",
+        skuSnapshot: null,
+        unitSnapshot: cart[idx]?.unit ?? "PIECE",
+        unitPriceMinor: line.unitPriceMinor,
+        quantityMilli: line.quantityMilli,
+        lineDiscountMinor: line.discountMinor,
+        gstRateBasisPoints: line.gstRateBasisPoints,
+        lineTotalMinor: line.totalMinor,
+      })),
+      customer: customer ? { name: customer.name, phone: customer.phone, email: null, address: null, gstin: null } : null,
+      business: {
+        name: businessInfo.name,
+        address: businessInfo.address,
+        phone: businessInfo.phone,
+        email: businessInfo.email,
+        gstin: businessInfo.gstin,
+        logoUrl: businessInfo.logoUrl,
+        settings: {
+          receiptFooter: businessInfo.receiptFooter,
+          termsAndConditions: businessInfo.termsAndConditions,
+          currency: businessInfo.currency,
+        },
+      },
+    };
+  }
+
+  function resetBill() {
+    setCart([]);
+    setCustomer(null);
+    setNotes("");
+    setAmountPaidTouched(false);
+    setAmountPaidInput("");
+    setBillDiscountType("NONE");
+    setBillDiscountValue(0);
+  }
+
   async function handleCheckout() {
     if (cart.length === 0) return;
     setSubmitting(true);
-    const result = await createInvoiceAction({
+
+    const payload: CreateInvoiceInput = {
       customerId: customer?.id || "",
       items: cart.map((item) => ({
         productId: item.productId,
@@ -196,21 +266,38 @@ export function BillingScreen({
       paymentMethod,
       amountPaid: totals.amountPaidMinor / 100,
       notes,
-    });
-    setSubmitting(false);
+    };
 
-    if (!result.ok) {
-      toast.error(result.error);
-      return;
+    try {
+      const outcome = await createInvoiceOnlineOrQueue(businessId, payload, buildReceiptSnapshot);
+
+      if (outcome.mode === "online") {
+        if (!outcome.result.ok) {
+          toast.error(outcome.result.error);
+          return;
+        }
+        toast.success(`Invoice ${outcome.result.data.invoiceNumber} saved.`);
+        router.push(`/invoices/${outcome.result.data.id}`);
+        return;
+      }
+
+      // Queued for later sync - decrement local stock so a second offline
+      // sale on this device doesn't oversell the same cached quantity.
+      await Promise.all(cart.map((item) => decrementCachedStock(businessId, item.productId, item.quantity)));
+      toast.success(`Saved offline as ${outcome.receipt.invoiceNumber} - it'll sync automatically once you're back online.`);
+      setOfflineReceipt(outcome.receipt);
+      resetBill();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
-    toast.success(`Invoice ${result.data.invoiceNumber} saved.`);
-    router.push(`/invoices/${result.data.id}`);
   }
 
   return (
     <div className="grid lg:grid-cols-[1fr_400px] h-[calc(100vh-3.5rem)]">
       <div className="overflow-y-auto p-4 sm:p-6 border-r border-paper-line">
-        <ProductSearchPanel onAdd={addProduct} />
+        <ProductSearchPanel businessId={businessId} onAdd={addProduct} />
       </div>
 
       <div className="flex flex-col bg-paper-raised overflow-hidden">
@@ -221,7 +308,7 @@ export function BillingScreen({
         </div>
 
         <div className="px-4 sm:px-5 py-3 border-b border-paper-line">
-          <CustomerPicker selected={customer} onSelect={setCustomer} />
+          <CustomerPicker businessId={businessId} selected={customer} onSelect={setCustomer} />
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 sm:px-5">
@@ -245,21 +332,7 @@ export function BillingScreen({
           )}
         </div>
 
-         <div
-    onPointerDown={handleSummaryDragStart}
-    className="h-6 shrink-0 border-t border-paper-line bg-paper flex items-center justify-center cursor-row-resize touch-none"
-    aria-label="Resize bill summary"
-    role="separator"
-    aria-orientation="horizontal"
-  >
-    <div className="w-10 h-1 rounded-full bg-slate/40" />
-  </div>
-
-  {/* Checkout summary */}
-  <div
-    className="shrink-0 overflow-y-auto px-4 sm:px-5 py-3 space-y-3 bg-paper"
-    style={{ height: summaryHeight }}
-  >
+        <div className="border-t border-paper-line px-4 sm:px-5 py-3 space-y-3 bg-paper">
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-2 text-sm font-medium text-ink cursor-pointer">
               <span
@@ -314,7 +387,8 @@ export function BillingScreen({
             className="w-full h-9 rounded-md border border-paper-line-2 px-2 text-sm"
           />
 
-          <dl className="text-sm space-y-1">            <Row label="Subtotal" value={formatMoney(totals.subtotalMinor)} />
+          <dl className="text-sm space-y-1">
+            <Row label="Subtotal" value={formatMoney(totals.subtotalMinor)} />
             {totals.billDiscountMinor > 0 && (
               <Row label="Bill discount" value={`- ${formatMoney(totals.billDiscountMinor)}`} muted />
             )}
@@ -365,6 +439,12 @@ export function BillingScreen({
             <p className="text-xs text-brick font-medium">Amount due: {formatMoney(totals.amountDueMinor)}</p>
           )}
 
+          {!online && (
+            <p className="flex items-center gap-1.5 text-xs text-amber-dark font-medium">
+              <WifiOff className="size-3.5" /> You&apos;re offline - this bill will save locally and sync automatically.
+            </p>
+          )}
+
           <Button
             className="w-full h-11 text-base"
             variant="amber"
@@ -376,6 +456,22 @@ export function BillingScreen({
           </Button>
         </div>
       </div>
+
+      {offlineReceipt && (
+        <div className="fixed inset-0 z-50 bg-ink/40 flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl my-8">
+            <div className="no-print flex justify-end gap-2 mb-3">
+              <Button variant="outline" onClick={() => setOfflineReceipt(null)}>
+                <X className="size-4" /> Close
+              </Button>
+              <Button onClick={() => window.print()}>
+                <Printer className="size-4" /> Print
+              </Button>
+            </div>
+            <ReceiptView invoice={offlineReceipt} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

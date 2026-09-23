@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Search, UserPlus, X } from "lucide-react";
+import { Search, UserPlus, X, WifiOff } from "lucide-react";
 import { listCustomersAction } from "@/lib/actions/customers";
 import { Dialog } from "@/components/ui/dialog";
 import { CustomerForm } from "@/components/customers/customer-form";
 import { Input } from "@/components/ui/input";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { searchCachedCustomers } from "@/lib/offline/cache";
 
 export interface BillingCustomer {
   id: string;
@@ -16,9 +17,11 @@ export interface BillingCustomer {
 }
 
 export function CustomerPicker({
+  businessId,
   selected,
   onSelect,
 }: {
+  businessId: string;
   selected: BillingCustomer | null;
   onSelect: (customer: BillingCustomer | null) => void;
 }) {
@@ -27,13 +30,32 @@ export function CustomerPicker({
   const [search, setSearch] = useState("");
   const debounced = useDebouncedValue(search, 200);
   const [results, setResults] = useState<BillingCustomer[]>([]);
+  const [fromCache, setFromCache] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    listCustomersAction(debounced).then((res) => {
-      if (res.ok) setResults(res.data);
-    });
-  }, [debounced, open]);
+    let cancelled = false;
+
+    listCustomersAction(debounced)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          setResults(res.data);
+          setFromCache(false);
+        }
+      })
+      .catch(async () => {
+        if (cancelled) return;
+        const cached = await searchCachedCustomers(businessId, debounced);
+        if (cancelled) return;
+        setResults(cached);
+        setFromCache(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debounced, open, businessId]);
 
   if (selected) {
     return (
@@ -74,6 +96,11 @@ export function CustomerPicker({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+              {fromCache && (
+                <p className="flex items-center gap-1.5 text-xs text-amber-dark mt-1.5">
+                  <WifiOff className="size-3.5" /> Showing saved customers.
+                </p>
+              )}
             </div>
             <button
               onClick={() => {

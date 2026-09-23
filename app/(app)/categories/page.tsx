@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Tags } from "lucide-react";
+import { Plus, Pencil, Trash2, Tags, CornerDownRight } from "lucide-react";
 import {
   listCategoriesAction,
   createCategoryAction,
@@ -14,35 +14,56 @@ import {
 import { categorySchema, type CategoryInput } from "@/schemas/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Textarea } from "@/components/ui/primitives";
+import { Label, Select, Textarea } from "@/components/ui/primitives";
 import { Dialog, ConfirmDialog } from "@/components/ui/dialog";
+import { OfflineListNotice, OfflineStaleBanner } from "@/components/layout/offline-list-notice";
+import { flattenCategoryTree, indentLabel } from "@/lib/category-tree";
 
 type Category = {
   id: string;
   name: string;
   description: string | null;
-  _count: { products: number };
+  parentId: string | null;
+  _count: { products: number; children: number };
 };
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  const [offline, setOffline] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
+  const [addUnderParentId, setAddUnderParentId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   async function load() {
     setLoading(true);
-    const res = await listCategoriesAction();
-    if (res.ok) setCategories(res.data);
-    setLoading(false);
+    try {
+      const res = await listCategoriesAction();
+      if (res.ok) setCategories(res.data as unknown as Category[]);
+      setOffline(false);
+    } catch {
+      // Request never reached the server - keep whatever was already
+      // loaded rather than spinning forever or clearing the list.
+      setOffline(true);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount
     load();
   }, []);
+
+  useEffect(() => {
+    // Refetch automatically once the connection comes back.
+    window.addEventListener("online", load);
+    return () => window.removeEventListener("online", load);
+  }, []);
+
+  const flattened = useMemo(() => flattenCategoryTree(categories), [categories]);
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -61,10 +82,14 @@ export default function CategoriesPage() {
   return (
     <div className="p-4 sm:p-6">
       <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-slate">Organize products so they&apos;re easy to find at the billing screen.</p>
+        <p className="text-sm text-slate max-w-lg">
+          Nest categories as deep as your business needs - e.g. Clothing → Ladies → Suits → Cotton.
+          Grocery might just need one level.
+        </p>
         <Button
           onClick={() => {
             setEditing(null);
+            setAddUnderParentId(null);
             setFormOpen(true);
           }}
         >
@@ -73,50 +98,66 @@ export default function CategoriesPage() {
       </div>
 
       <div className="rounded-lg border border-paper-line bg-paper-raised overflow-hidden">
-        {loading ? (
+        {loading && categories.length === 0 ? (
           <div className="p-10 text-center text-sm text-slate">Loading…</div>
+        ) : offline && categories.length === 0 ? (
+          <OfflineListNotice label="Can't reach the server to load categories." onRetry={load} />
         ) : categories.length === 0 ? (
           <div className="p-10 text-center">
             <Tags className="size-8 text-slate/50 mx-auto mb-2" />
             <p className="text-sm text-slate">No categories yet.</p>
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-paper-line text-left text-xs uppercase tracking-wide text-slate">
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium">Description</th>
-                <th className="px-4 py-3 font-medium">Products</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {categories.map((c) => (
-                <tr key={c.id} className="border-b border-paper-line last:border-0 hover:bg-paper/60">
-                  <td className="px-4 py-3 font-medium text-ink">{c.name}</td>
-                  <td className="px-4 py-3 text-slate">{c.description || "—"}</td>
-                  <td className="px-4 py-3 tabular text-ink-2">{c._count.products}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          setEditing(c);
-                          setFormOpen(true);
-                        }}
-                      >
-                        <Pencil className="size-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(c)}>
-                        <Trash2 className="size-4 text-brick" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <>
+            {offline && (
+              <div className="p-3 pb-0">
+                <OfflineStaleBanner />
+              </div>
+            )}
+          <div className="divide-y divide-paper-line">
+            {flattened.map(({ category: c, depth }) => (
+              <div key={c.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                <div className="flex items-center gap-2 min-w-0" style={{ paddingLeft: depth * 20 }}>
+                  {depth > 0 && <CornerDownRight className="size-3.5 text-slate/50 shrink-0" />}
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-ink truncate">{c.name}</p>
+                    {c.description && <p className="text-xs text-slate truncate">{c.description}</p>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-xs text-slate tabular hidden sm:inline">
+                    {c._count.products} product{c._count.products === 1 ? "" : "s"}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setEditing(null);
+                      setAddUnderParentId(c.id);
+                      setFormOpen(true);
+                    }}
+                  >
+                    <Plus className="size-3.5" /> Sub
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      setEditing(c);
+                      setAddUnderParentId(null);
+                      setFormOpen(true);
+                    }}
+                  >
+                    <Pencil className="size-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(c)}>
+                    <Trash2 className="size-4 text-brick" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+          </>
         )}
       </div>
 
@@ -124,6 +165,8 @@ export default function CategoriesPage() {
         open={formOpen}
         onOpenChange={setFormOpen}
         editing={editing}
+        defaultParentId={addUnderParentId}
+        allCategories={categories}
         onSaved={() => {
           setFormOpen(false);
           load();
@@ -134,7 +177,11 @@ export default function CategoriesPage() {
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={`Delete "${deleteTarget?.name}"?`}
-        description="Products in this category will become uncategorized."
+        description={
+          deleteTarget && deleteTarget._count.children > 0
+            ? "This category has subcategories - delete or move those first."
+            : "Products in this category will become uncategorized."
+        }
         confirmLabel="Delete category"
         destructive
         loading={deleting}
@@ -148,11 +195,15 @@ function CategoryFormDialog({
   open,
   onOpenChange,
   editing,
+  defaultParentId,
+  allCategories,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   editing: Category | null;
+  defaultParentId: string | null;
+  allCategories: Category[];
   onSaved: () => void;
 }) {
   const [loading, setLoading] = useState(false);
@@ -161,11 +212,23 @@ function CategoryFormDialog({
     handleSubmit,
     reset,
     formState: { errors },
-  } = useForm<CategoryInput>({ resolver: zodResolver(categorySchema) });
+  } = useForm<CategoryInput>({ resolver: zodResolver(categorySchema) as never });
 
   useEffect(() => {
-    reset({ name: editing?.name ?? "", description: editing?.description ?? "" });
-  }, [editing, open, reset]);
+    reset({
+      name: editing?.name ?? "",
+      description: editing?.description ?? "",
+      parentId: editing?.parentId ?? defaultParentId ?? "",
+    });
+  }, [editing, defaultParentId, open, reset]);
+
+  // A category can't be parented under itself or (checked server-side too)
+  // one of its own descendants - keep the option list simple here and let
+  // the server give the definitive error if something slips through.
+  const parentOptions = useMemo(
+    () => flattenCategoryTree(allCategories.filter((c) => c.id !== editing?.id)),
+    [allCategories, editing]
+  );
 
   async function onSubmit(values: CategoryInput) {
     setLoading(true);
@@ -188,6 +251,17 @@ function CategoryFormDialog({
           <Label htmlFor="cat-name">Name</Label>
           <Input id="cat-name" invalid={!!errors.name} {...register("name")} placeholder="Grocery" />
           {errors.name && <p className="text-xs text-brick mt-1">{errors.name.message}</p>}
+        </div>
+        <div>
+          <Label htmlFor="cat-parent">Parent category</Label>
+          <Select id="cat-parent" {...register("parentId")}>
+            <option value="">No parent (top level)</option>
+            {parentOptions.map(({ category: c, depth }) => (
+              <option key={c.id} value={c.id}>
+                {indentLabel(c.name, depth)}
+              </option>
+            ))}
+          </Select>
         </div>
         <div>
           <Label htmlFor="cat-desc">Description</Label>

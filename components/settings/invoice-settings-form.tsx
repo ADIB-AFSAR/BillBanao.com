@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { businessSettingsSchema, type BusinessSettingsInput } from "@/schemas/common";
 import { updateBusinessSettingsAction } from "@/lib/actions/business";
@@ -46,6 +47,7 @@ function Toggle({
 
 export function InvoiceSettingsForm({ defaultValues }: { defaultValues: BusinessSettingsInput }) {
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
   const {
     register,
     handleSubmit,

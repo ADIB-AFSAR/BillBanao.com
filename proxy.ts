@@ -2,14 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 
 const PUBLIC_PATHS = ["/login", "/register"];
-const COOKIE_NAME = "billing_session";
+const BUSINESS_COOKIE = "billing_session";
+const ADMIN_COOKIE = "platform_admin_session";
 
-async function isValidSession(token: string | undefined): Promise<boolean> {
+async function isValidSession(token: string | undefined, requireField?: string): Promise<boolean> {
   if (!token) return false;
   const secret = process.env.AUTH_SECRET;
   if (!secret) return false;
   try {
-    await jwtVerify(token, new TextEncoder().encode(secret));
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
+    if (requireField && !(requireField in payload)) return false;
     return true;
   } catch {
     return false;
@@ -18,9 +20,27 @@ async function isValidSession(token: string | undefined): Promise<boolean> {
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const token = request.cookies.get(COOKIE_NAME)?.value;
-  const isPublicPath = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 
+  // --- Platform admin area: entirely separate auth zone from the business
+  // app below. A business user's session cookie is never valid here, and
+  // vice versa - see lib/auth/admin-session.ts for why that's safe.
+  if (pathname.startsWith("/admin")) {
+    const adminToken = request.cookies.get(ADMIN_COOKIE)?.value;
+    const isAdminAuthenticated = await isValidSession(adminToken, "adminId");
+    const isAdminLoginPage = pathname === "/admin/login";
+
+    if (!isAdminAuthenticated && !isAdminLoginPage) {
+      return NextResponse.redirect(new URL("/admin/login", request.url));
+    }
+    if (isAdminAuthenticated && isAdminLoginPage) {
+      return NextResponse.redirect(new URL("/admin", request.url));
+    }
+    return NextResponse.next();
+  }
+
+  // --- Business app ---------------------------------------------------
+  const token = request.cookies.get(BUSINESS_COOKIE)?.value;
+  const isPublicPath = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
   const authenticated = await isValidSession(token);
 
   if (!authenticated && !isPublicPath && pathname !== "/") {
@@ -37,5 +57,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|icon.svg|billbanao-og-image-v4.jpg).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 };

@@ -10,8 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, Badge } from "@/components/ui/primitives";
 import { ConfirmDialog } from "@/components/ui/dialog";
+import { OfflineListNotice, OfflineStaleBanner } from "@/components/layout/offline-list-notice";
 import { formatMoney, UNIT_LABELS, formatPercent } from "@/lib/money";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { flattenCategoryTree, indentLabel } from "@/lib/category-tree";
 
 type Product = {
   id: string;
@@ -30,8 +32,9 @@ type Product = {
 
 export function ProductTable() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [categories, setCategories] = useState<{ id: string; name: string; parentId: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [offline, setOffline] = useState(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 250);
   const [categoryId, setCategoryId] = useState("");
@@ -42,14 +45,23 @@ export function ProductTable() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await listProductsAction({
-      search: debouncedSearch,
-      categoryId: categoryId || undefined,
-      status,
-      sortBy,
-    });
-    if (res.ok) setProducts(res.data as unknown as Product[]);
-    setLoading(false);
+    try {
+      const res = await listProductsAction({
+        search: debouncedSearch,
+        categoryId: categoryId || undefined,
+        status,
+        sortBy,
+      });
+      if (res.ok) setProducts(res.data as unknown as Product[]);
+      setOffline(false);
+    } catch {
+      // The request never reached the server (no connection) - keep
+      // whatever was already loaded on screen and flag it as stale rather
+      // than spinning forever or wiping the list to empty.
+      setOffline(true);
+    } finally {
+      setLoading(false);
+    }
   }, [debouncedSearch, categoryId, status, sortBy]);
 
   useEffect(() => {
@@ -58,9 +70,21 @@ export function ProductTable() {
   }, [load]);
 
   useEffect(() => {
-    listCategoriesAction().then((res) => {
-      if (res.ok) setCategories(res.data);
-    });
+    // Refetch automatically the moment the connection comes back, so the
+    // list doesn't stay stale until the person happens to change a filter.
+    window.addEventListener("online", load);
+    return () => window.removeEventListener("online", load);
+  }, [load]);
+
+  useEffect(() => {
+    listCategoriesAction()
+      .then((res) => {
+        if (res.ok) setCategories(res.data);
+      })
+      .catch(() => {
+        // Category filter just stays empty offline - not fatal, the main
+        // product list load() above handles its own offline state.
+      });
   }, []);
 
   async function handleDelete() {
@@ -101,9 +125,9 @@ export function ProductTable() {
         </div>
         <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="sm:w-44">
           <option value="">All categories</option>
-          {categories.map((c) => (
+          {flattenCategoryTree(categories).map(({ category: c, depth }) => (
             <option key={c.id} value={c.id}>
-              {c.name}
+              {indentLabel(c.name, depth)}
             </option>
           ))}
         </Select>
@@ -126,14 +150,22 @@ export function ProductTable() {
       </div>
 
       <div className="rounded-lg border border-paper-line bg-paper-raised overflow-hidden">
-        {loading ? (
+        {loading && products.length === 0 ? (
           <div className="p-10 text-center text-sm text-slate">Loading products…</div>
+        ) : offline && products.length === 0 ? (
+          <OfflineListNotice label="Can't reach the server to load products." onRetry={load} />
         ) : products.length === 0 ? (
           <div className="p-10 text-center">
             <PackageX className="size-8 text-slate/50 mx-auto mb-2" />
             <p className="text-sm text-slate">No products found. Add your first product to get started.</p>
           </div>
         ) : (
+          <>
+            {offline && (
+              <div className="p-3 pb-0">
+                <OfflineStaleBanner />
+              </div>
+            )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -193,6 +225,7 @@ export function ProductTable() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 

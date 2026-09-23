@@ -1,7 +1,8 @@
 "use server";
 
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/auth/session";
+import { requireSession, requireActiveSession } from "@/lib/auth/session";
+import { assertPermission } from "@/lib/auth/permissions";
 import { productSchema } from "@/schemas/common";
 import { toBasisPoints, toMinorUnits } from "@/lib/money";
 import { runAction } from "./action-result";
@@ -94,7 +95,8 @@ export async function getProductAction(id: string) {
 
 export async function createProductAction(formData: unknown) {
   return runAction(async () => {
-    const session = await requireSession();
+    const session = await requireActiveSession();
+    await assertPermission(session, "canManageProducts");
     const input = productSchema.parse(formData);
 
     return prisma.product.create({
@@ -120,7 +122,8 @@ export async function createProductAction(formData: unknown) {
 
 export async function updateProductAction(id: string, formData: unknown) {
   return runAction(async () => {
-    const session = await requireSession();
+    const session = await requireActiveSession();
+    await assertPermission(session, "canManageProducts");
     const input = productSchema.parse(formData);
 
     const existing = await prisma.product.findUnique({ where: { id } });
@@ -151,7 +154,8 @@ export async function updateProductAction(id: string, formData: unknown) {
 
 export async function deleteProductAction(id: string) {
   return runAction(async () => {
-    const session = await requireSession();
+    const session = await requireActiveSession();
+    await assertPermission(session, "canManageProducts");
     const existing = await prisma.product.findUnique({ where: { id } });
     if (!existing || existing.businessId !== session.businessId) {
       throw new Error("FORBIDDEN");
@@ -163,7 +167,8 @@ export async function deleteProductAction(id: string) {
 
 export async function adjustStockAction(id: string, quantityChange: number, reason: string) {
   return runAction(async () => {
-    const session = await requireSession();
+    const session = await requireActiveSession();
+    await assertPermission(session, "canManageProducts");
     const existing = await prisma.product.findUnique({ where: { id } });
     if (!existing || existing.businessId !== session.businessId) {
       throw new Error("FORBIDDEN");
@@ -190,5 +195,22 @@ export async function adjustStockAction(id: string, quantityChange: number, reas
       });
       return product;
     }, { timeout: 10_000 });
+  });
+}
+
+/**
+ * Returns every active product for this business, unpaginated - used only
+ * to warm the client-side offline cache (lib/offline/cache.ts) when the
+ * billing screen loads. searchProductsForBillingAction stays capped at 20
+ * results for normal typeahead use; this one intentionally isn't capped.
+ */
+export async function listAllProductsForCacheAction() {
+  return runAction(async () => {
+    const session = await requireSession();
+    return prisma.product.findMany({
+      where: { businessId: session.businessId, isActive: true },
+      orderBy: { name: "asc" },
+      include: { category: true },
+    });
   });
 }

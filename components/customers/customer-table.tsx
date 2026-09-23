@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Search, Plus, Pencil, Trash2, Users } from "lucide-react";
+import { Search, Plus, Pencil, Trash2, Users, FileDown, Lock } from "lucide-react";
 import { listCustomersAction, deleteCustomerAction } from "@/lib/actions/customers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/dialog";
+import { OfflineListNotice, OfflineStaleBanner } from "@/components/layout/offline-list-notice";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { generateCustomersReportPdf } from "@/lib/reports/generate-customers-pdf";
 
 type Customer = {
   id: string;
@@ -19,9 +21,16 @@ type Customer = {
   state: string | null;
 };
 
-export function CustomerTable() {
+export function CustomerTable({
+  canExportPdf = false,
+  businessName = "Business",
+}: {
+  canExportPdf?: boolean;
+  businessName?: string;
+}) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [offline, setOffline] = useState(false);
   const [search, setSearch] = useState("");
   const debounced = useDebouncedValue(search, 250);
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
@@ -29,14 +38,28 @@ export function CustomerTable() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await listCustomersAction(debounced);
-    if (res.ok) setCustomers(res.data);
-    setLoading(false);
+    try {
+      const res = await listCustomersAction(debounced);
+      if (res.ok) setCustomers(res.data);
+      setOffline(false);
+    } catch {
+      // Request never reached the server - keep whatever was already
+      // loaded rather than spinning forever or clearing the list.
+      setOffline(true);
+    } finally {
+      setLoading(false);
+    }
   }, [debounced]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-filter-change
     load();
+  }, [load]);
+
+  useEffect(() => {
+    // Refetch automatically once the connection comes back.
+    window.addEventListener("online", load);
+    return () => window.removeEventListener("online", load);
   }, [load]);
 
   async function handleDelete() {
@@ -53,6 +76,18 @@ export function CustomerTable() {
     load();
   }
 
+  function handleExportPdf() {
+    if (!canExportPdf) {
+      toast.error("PDF export is a paid-plan feature. Visit Plans & Billing to upgrade.");
+      return;
+    }
+    if (customers.length === 0) {
+      toast.error("No customers to export.");
+      return;
+    }
+    generateCustomersReportPdf(businessName, customers);
+  }
+
   return (
     <div>
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
@@ -65,6 +100,14 @@ export function CustomerTable() {
             className="pl-9"
           />
         </div>
+        <Button
+          variant="outline"
+          onClick={handleExportPdf}
+          title={canExportPdf ? "Export PDF" : "Upgrade to export PDF"}
+        >
+          {canExportPdf ? <FileDown className="size-4" /> : <Lock className="size-4" />}
+          Export PDF
+        </Button>
         <Link href="/customers/new">
           <Button className="w-full sm:w-auto">
             <Plus className="size-4" /> Add customer
@@ -73,14 +116,22 @@ export function CustomerTable() {
       </div>
 
       <div className="rounded-lg border border-paper-line bg-paper-raised overflow-hidden">
-        {loading ? (
+        {loading && customers.length === 0 ? (
           <div className="p-10 text-center text-sm text-slate">Loading…</div>
+        ) : offline && customers.length === 0 ? (
+          <OfflineListNotice label="Can't reach the server to load customers." onRetry={load} />
         ) : customers.length === 0 ? (
           <div className="p-10 text-center">
             <Users className="size-8 text-slate/50 mx-auto mb-2" />
             <p className="text-sm text-slate">No customers yet.</p>
           </div>
         ) : (
+          <>
+            {offline && (
+              <div className="p-3 pb-0">
+                <OfflineStaleBanner />
+              </div>
+            )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -116,6 +167,7 @@ export function CustomerTable() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 

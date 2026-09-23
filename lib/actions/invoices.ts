@@ -1,7 +1,8 @@
 "use server";
 
 import { prisma } from "@/lib/db";
-import { requireSession } from "@/lib/auth/session";
+import { requireActiveSession, requireSession } from "@/lib/auth/session";
+import { assertPermission } from "@/lib/auth/permissions";
 import { createInvoiceSchema } from "@/schemas/invoice";
 import { calculateInvoiceTotals } from "@/lib/billing/calculate";
 import type { Discount, InvoiceLineInput, TaxType } from "@/lib/billing/types";
@@ -24,14 +25,40 @@ function resolveTaxType(businessState: string | null, customerState: string | nu
 
 export async function createInvoiceAction(formData: unknown) {
   return runAction(async () => {
-    const session = await requireSession();
+    const session = await requireActiveSession();
     const input = createInvoiceSchema.parse(formData);
+
+    // Idempotency check first, before any other work: if this exact
+    // offline-queued bill already made it through on a previous sync
+    // attempt (e.g. the response was lost after the server had already
+    // committed), return the existing invoice instead of billing again.
+    if (input.idempotencyKey) {
+      const existing = await prisma.invoice.findUnique({
+        where: { businessId_idempotencyKey: { businessId: session.businessId, idempotencyKey: input.idempotencyKey } },
+        include: { items: true, payments: true, customer: true },
+      });
+      if (existing) return existing;
+    }
 
     const business = await prisma.business.findUniqueOrThrow({
       where: { id: session.businessId },
-      include: { settings: true },
+      include: { settings: true, plan: true },
     });
     if (!business.settings) throw new Error("Business settings are missing. Please contact support.");
+
+    if (business.plan?.maxInvoicesPerMonth != null) {
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const invoicesThisMonth = await prisma.invoice.count({
+        where: { businessId: session.businessId, invoiceDate: { gte: monthStart } },
+      });
+      if (invoicesThisMonth >= business.plan.maxInvoicesPerMonth) {
+        throw new Error(
+          `You've reached your plan's limit of ${business.plan.maxInvoicesPerMonth} invoices this month. Upgrade your plan to create more.`
+        );
+      }
+    }
 
     const productIds = input.items.map((i: { productId: string }) => i.productId);
     const products = await prisma.product.findMany({
@@ -128,6 +155,7 @@ export async function createInvoiceAction(formData: unknown) {
         data: {
           businessId: session.businessId,
           invoiceNumber,
+          idempotencyKey: input.idempotencyKey ?? null,
           customerId: customer?.id ?? null,
           customerNameSnapshot: customer?.name ?? "Walk-in Customer",
           businessStateSnapshot: business.state,
@@ -252,6 +280,7 @@ export interface InvoiceListParams {
 export async function listInvoicesAction(params: InvoiceListParams = {}) {
   return runAction(async () => {
     const session = await requireSession();
+    await assertPermission(session, "canViewInvoiceHistory");
 
     const where: Prisma.InvoiceWhereInput = {
       businessId: session.businessId,

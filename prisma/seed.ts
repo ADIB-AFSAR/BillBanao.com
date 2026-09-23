@@ -18,6 +18,9 @@ async function main() {
   console.log("Seeding database...");
 
   // Clean slate for repeatable seeding in development.
+  await prisma.notificationView.deleteMany();
+  await prisma.notification.deleteMany();
+  await prisma.userSession.deleteMany();
   await prisma.inventoryTransaction.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.invoiceItem.deleteMany();
@@ -28,11 +31,90 @@ async function main() {
   await prisma.user.deleteMany();
   await prisma.businessSettings.deleteMany();
   await prisma.business.deleteMany();
+  await prisma.plan.deleteMany();
+  await prisma.platformSettings.deleteMany();
+  await prisma.platformAdmin.deleteMany();
+
+  // Platform-wide defaults (trial length etc). Editable later at /admin/settings.
+  await prisma.platformSettings.create({ data: { id: "singleton", trialDurationDays: 30 } });
+
+  // Platform admin account - separate from any business login. Sign in at
+  // /admin/login to see every registered business, their products and
+  // categories, and to flip a business's billing status by hand.
+  const adminPasswordHash = await bcrypt.hash("admin123", 10);
+  await prisma.platformAdmin.create({
+    data: {
+      email: "admin@example.com",
+      passwordHash: adminPasswordHash,
+      name: "Platform Admin",
+    },
+  });
+  console.log("Platform admin login -> /admin/login -> admin@example.com / admin123");
+
+  // A small, realistic plan lineup - selectable by owners, never free text.
+  const [starterPlan, standardPlan, premiumPlan] = await Promise.all([
+    prisma.plan.create({
+      data: {
+        name: "Starter",
+        priceLabel: "\u20b9499/month",
+        description: "For a single counter just getting going.",
+        maxCustomers: 100,
+        maxInvoicesPerMonth: 200,
+        maxConcurrentLogins: 1,
+        canExportPdf: false,
+        sortOrder: 0,
+      },
+    }),
+    prisma.plan.create({
+      data: {
+        name: "Standard",
+        priceLabel: "\u20b9999/month",
+        description: "Most shops land here - more room, PDF reports included.",
+        maxCustomers: 1000,
+        maxInvoicesPerMonth: 1000,
+        maxConcurrentLogins: 2,
+        canExportPdf: true,
+        sortOrder: 1,
+      },
+    }),
+    prisma.plan.create({
+      data: {
+        name: "Premium",
+        priceLabel: "\u20b92499/month",
+        description: "Multiple counters, no caps.",
+        maxCustomers: null,
+        maxInvoicesPerMonth: null,
+        maxConcurrentLogins: 5,
+        canExportPdf: true,
+        sortOrder: 2,
+      },
+    }),
+  ]);
+
+  console.log(`Created plans: ${starterPlan.name}, ${standardPlan.name}, ${premiumPlan.name}`);
+
+  await prisma.notification.create({
+    data: {
+      title: "New year offer",
+      body: "Get 20% off the Standard plan this month only.",
+      ctaLabel: "View plans",
+      ctaHref: "/plans",
+      isActive: true,
+      maxViewsPerBusiness: 3,
+    },
+  });
+
+  const paidUntil = new Date();
+  paidUntil.setDate(paidUntil.getDate() + 30);
 
   const business = await prisma.business.create({
     data: {
       name: "ABC General Store",
       ownerName: "Aditi Sharma",
+      subscriptionStatus: "ACTIVE",
+      planId: standardPlan.id,
+      paidUntil,
+      adminNotes: "Paid via UPI at signup (seed data).",
       address: "Shop 12, Sector 18 Market, Noida",
       phone: "+91 98765 43210",
       email: "hello@abcgeneralstore.example",
@@ -68,12 +150,45 @@ async function main() {
   });
   console.log("Demo login -> email: owner@example.com / password: password123");
 
+  // A staff login to demonstrate the permissions system: can run the
+  // billing screen and manage products/customers, but can't see sales
+  // analytics or edit business settings.
+  const staffPasswordHash = await bcrypt.hash("staff123", 10);
+  await prisma.user.create({
+    data: {
+      email: "staff@example.com",
+      passwordHash: staffPasswordHash,
+      name: "Rahul Singh",
+      role: "STAFF",
+      businessId: business.id,
+      canViewAnalytics: false,
+      canManageProducts: true,
+      canManageCustomers: true,
+      canManageCategories: false,
+      canViewInvoiceHistory: true,
+    },
+  });
+  console.log("Demo staff login -> email: staff@example.com / password: staff123");
+
   const [grocery, electronics, clothing, services] = await Promise.all([
     prisma.category.create({ data: { businessId: business.id, name: "Grocery" } }),
     prisma.category.create({ data: { businessId: business.id, name: "Electronics" } }),
     prisma.category.create({ data: { businessId: business.id, name: "Clothing" } }),
     prisma.category.create({ data: { businessId: business.id, name: "Services" } }),
   ]);
+
+  // Demonstrates arbitrary-depth categories: Clothing -> Ladies -> Suits -> Cotton.
+  // Grocery/Electronics/Services deliberately stay flat - depth is opt-in per
+  // branch, not forced on the whole catalog.
+  const ladies = await prisma.category.create({
+    data: { businessId: business.id, name: "Ladies", parentId: clothing.id },
+  });
+  const suits = await prisma.category.create({
+    data: { businessId: business.id, name: "Suits", parentId: ladies.id },
+  });
+  const cottonSuits = await prisma.category.create({
+    data: { businessId: business.id, name: "Cotton", parentId: suits.id },
+  });
 
   const rice = await prisma.product.create({
     data: {
@@ -120,7 +235,7 @@ async function main() {
   const tshirt = await prisma.product.create({
     data: {
       businessId: business.id,
-      categoryId: clothing.id,
+      categoryId: cottonSuits.id,
       name: "Cotton T-Shirt",
       sku: "TSHIRT-M",
       unitPriceMinor: 49_900,

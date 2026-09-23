@@ -92,6 +92,7 @@ export type ProductInput = z.infer<typeof productSchema>;
 export const categorySchema = z.object({
   name: z.string().trim().min(1, "Category name cannot be empty").max(80),
   description: z.string().trim().max(300).optional().or(z.literal("")),
+  parentId: z.string().trim().optional().or(z.literal("")), // "" = top-level
 });
 export type CategoryInput = z.infer<typeof categorySchema>;
 

@@ -4,16 +4,21 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Menu, LogOut, User, ChevronDown } from "lucide-react";
 import { logoutAction } from "@/lib/actions/auth";
+import { clearOfflineCaches } from "@/components/pwa/sw-register";
 import { MobileDrawer } from "./mobile-drawer";
 
 export function Topbar({
   businessName,
   userName,
   title,
+  role,
+  canViewInvoiceHistory,
 }: {
   businessName: string;
   userName: string;
   title?: string;
+  role: "OWNER" | "STAFF";
+  canViewInvoiceHistory: boolean;
 }) {
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -21,6 +26,10 @@ export function Topbar({
 
   async function handleLogout() {
     await logoutAction();
+    // Drop the offline shell's cached pages so a shared/kiosk device
+    // doesn't keep showing this business's data with no connection after
+    // someone else signs in.
+    await clearOfflineCaches();
     router.push("/login");
     router.refresh();
   }
@@ -58,15 +67,21 @@ export function Topbar({
                   <p className="text-sm font-medium text-ink truncate">{userName}</p>
                   <p className="text-xs text-slate truncate">{businessName}</p>
                 </div>
-                <button
-                  onClick={() => {
-                    setMenuOpen(false);
-                    router.push("/settings");
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-ink-2 hover:bg-paper"
-                >
-                  <User className="size-4" /> Business settings
-                </button>
+                {role === "OWNER" && (
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      if (typeof navigator !== "undefined" && !navigator.onLine) {
+                        window.location.assign("/settings");
+                      } else {
+                        router.push("/settings");
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-ink-2 hover:bg-paper"
+                  >
+                    <User className="size-4" /> Business settings
+                  </button>
+                )}
                 <button
                   onClick={handleLogout}
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-brick hover:bg-brick-bg"
@@ -79,7 +94,13 @@ export function Topbar({
         </div>
       </header>
 
-      <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} businessName={businessName} />
+      <MobileDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        businessName={businessName}
+        role={role}
+        canViewInvoiceHistory={canViewInvoiceHistory}
+      />
     </>
   );
 }

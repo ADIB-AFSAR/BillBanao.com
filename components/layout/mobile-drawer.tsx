@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NavLink } from "./nav-link";
 import {
   LayoutDashboard,
   Receipt,
@@ -11,31 +11,49 @@ import {
   Users,
   History,
   Settings,
+  Sparkles,
+  UserCog,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/billing", label: "New Bill", icon: PlusCircle },
-  { href: "/products", label: "Products", icon: Package },
-  { href: "/categories", label: "Categories", icon: Tags },
-  { href: "/customers", label: "Customers", icon: Users },
-  { href: "/invoices", label: "Invoice History", icon: History },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
+interface NavItem {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  hidden?: boolean;
+}
+
+function buildNavItems(role: "OWNER" | "STAFF", canViewInvoiceHistory: boolean): NavItem[] {
+  return [
+    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/billing", label: "New Bill", icon: PlusCircle },
+    { href: "/products", label: "Products", icon: Package },
+    { href: "/categories", label: "Categories", icon: Tags },
+    { href: "/customers", label: "Customers", icon: Users },
+    { href: "/invoices", label: "Invoice History", icon: History, hidden: !canViewInvoiceHistory },
+    { href: "/plans", label: "Plans & Billing", icon: Sparkles },
+    { href: "/team", label: "Team", icon: UserCog, hidden: role !== "OWNER" },
+    { href: "/settings", label: "Settings", icon: Settings, hidden: role !== "OWNER" },
+  ].filter((item) => !item.hidden);
+}
 
 export function MobileDrawer({
   open,
   onClose,
   businessName,
+  role,
+  canViewInvoiceHistory,
 }: {
   open: boolean;
   onClose: () => void;
   businessName: string;
+  role: "OWNER" | "STAFF";
+  canViewInvoiceHistory: boolean;
 }) {
   const pathname = usePathname();
   if (!open) return null;
+  const navItems = buildNavItems(role, canViewInvoiceHistory);
 
   return (
     <div className="fixed inset-0 z-50 lg:hidden">
@@ -53,11 +71,11 @@ export function MobileDrawer({
           </button>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const active = pathname === item.href || pathname.startsWith(item.href + "/");
             const Icon = item.icon;
             return (
-              <Link
+              <NavLink
                 key={item.href}
                 href={item.href}
                 onClick={onClose}
@@ -68,7 +86,7 @@ export function MobileDrawer({
               >
                 <Icon className="size-4" />
                 {item.label}
-              </Link>
+              </NavLink>
             );
           })}
         </nav>

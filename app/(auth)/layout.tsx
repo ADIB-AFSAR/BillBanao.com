@@ -9,7 +9,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <span className="grid place-items-center size-8 rounded-md bg-amber text-white">
             <Receipt className="size-4" />
           </span>
-          <span className="font-semibold">BillBanao.com</span>
+          Ledger
         </Link>
         <div className="max-w-sm">
           <p className="text-2xl font-semibold leading-snug">
@@ -20,7 +20,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             automatically, and a receipt that prints cleanly every time.
           </p>
         </div>
-        <p className="text-xs text-paper/50 tabular">INV-000241 · ₹12,062.00 · Paid</p>
+        <p className="text-xs text-paper/50 tabular">INV-000241 · ₹1,062.00 · Paid</p>
       </div>
       <div className="flex items-center justify-center p-6 sm:p-10">
         <div className="w-full max-w-sm">
@@ -28,7 +28,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             <span className="grid place-items-center size-8 rounded-md bg-amber text-white">
               <Receipt className="size-4" />
             </span>
-            BillBanao.com
+            Ledger
           </Link>
           {children}
         </div>
