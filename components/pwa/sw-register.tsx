@@ -25,9 +25,17 @@ export async function clearOfflineCaches(): Promise<void> {
 export function ServiceWorkerRegister() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
-    navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).catch(() => {
-      // No offline shell this session - not fatal, see comment above.
-    });
+    navigator.serviceWorker
+  .register("/sw.js", {
+    scope: "/",
+    updateViaCache: "none",
+  })
+  .then((registration) => {
+    console.log("SW registered:", registration.scope);
+  })
+  .catch((error) => {
+    console.error("SW registration failed:", error);
+  });
   }, []);
 
   return null;
