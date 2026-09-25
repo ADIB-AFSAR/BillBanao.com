@@ -60,10 +60,30 @@ async function putInCache(cacheName, request, response) {
 // once we have a copy there's never a reason to ask the network again.
 async function cacheFirst(request) {
   const cached = await caches.match(request);
-  if (cached) return cached;
-  const response = await fetch(request);
-  if (response.ok) await putInCache(RUNTIME_CACHE, request, response.clone());
-  return response;
+
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const response = await fetch(request);
+
+    if (response.ok) {
+      await putInCache(RUNTIME_CACHE, request, response.clone());
+    }
+
+    return response;
+  } catch {
+    // This asset was never cached and the device is offline.
+    // Do not let the service worker throw an unhandled error.
+    return new Response("", {
+      status: 503,
+      statusText: "Offline asset unavailable",
+      headers: {
+        "Content-Type": "application/javascript",
+      },
+    });
+  }
 }
 
 // Everything else same-origin: try the network (racing a short timeout for
