@@ -34,12 +34,35 @@ async function warmRoutes() {
 
   for (const route of OFFLINE_ROUTES) {
     try {
-      await fetch(route, {
+      const response = await fetch(route, {
         credentials: "same-origin",
         cache: "no-store",
       });
+
+      if (!response.ok) continue;
+
+      const html = await response.text();
+
+      // Find Next.js static JS/CSS files referenced by this route.
+      const assets = Array.from(
+        html.matchAll(/(?:src|href)=["'](\/_next\/static\/[^"']+)["']/g)
+      ).map((match) => match[1]);
+
+      // Remove duplicates.
+      const uniqueAssets = [...new Set(assets)];
+
+      // Fetch them while online so the service worker caches them.
+      await Promise.allSettled(
+        uniqueAssets.map((asset) =>
+          fetch(asset, {
+            credentials: "same-origin",
+            cache: "no-store",
+          })
+        )
+      );
     } catch {
-      break;
+      // One route failing should not stop the remaining routes.
+      continue;
     }
   }
 }
