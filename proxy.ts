@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 
+
+
 const PUBLIC_PATHS = ["/login", "/register"];
 const BUSINESS_COOKIE = "billing_session";
 const ADMIN_COOKIE = "platform_admin_session";
@@ -20,6 +22,11 @@ async function isValidSession(token: string | undefined, requireField?: string):
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Service worker and offline fallback must never go through auth redirects.
+  if (pathname === "/sw.js" || pathname === "/offline.html") {
+    return NextResponse.next();
+  }
 
   // --- Platform admin area: entirely separate auth zone from the business
   // app below. A business user's session cookie is never valid here, and
@@ -57,5 +64,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|sw\\.js|offline\\.html).*)"],
 };
