@@ -5,7 +5,7 @@
 // screen. Bump CACHE_VERSION whenever this file's *caching strategy*
 // changes (not on every deploy - the runtime cache self-updates on every
 // successful fetch, so stale content isn't a real risk day to day).
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const STATIC_CACHE = `ledger-static-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `ledger-runtime-${CACHE_VERSION}`;
 const OFFLINE_URL = "/offline.html";
@@ -74,23 +74,66 @@ async function networkFirst(request) {
   const isNavigation = request.mode === "navigate";
 
   try {
-    const response = await (isNavigation ? Promise.race([fetch(request), timeout(NAV_TIMEOUT_MS)]) : fetch(request));
-    if (response && response.ok) await putInCache(RUNTIME_CACHE, request, response.clone());
+    const response = await (
+      isNavigation
+        ? Promise.race([
+            fetch(request),
+            timeout(NAV_TIMEOUT_MS),
+          ])
+        : fetch(request)
+    );
+
+    if (response && response.ok) {
+      await putInCache(
+        RUNTIME_CACHE,
+        request,
+        response.clone()
+      );
+    }
+
     return response;
   } catch {
     const cached = await caches.match(request);
+
     if (cached) {
-      if (isNavigation) {
-        fetch(request)
-          .then((response) => response.ok && putInCache(RUNTIME_CACHE, request, response))
-          .catch(() => {});
-      }
       return cached;
     }
+
+    // For Next.js RSC requests, try a cache match without
+    // depending on the exact query string.
+    const url = new URL(request.url);
+
+    if (url.searchParams.has("_rsc")) {
+      const baseUrl = new URL(url.origin + url.pathname);
+
+      const keys = await caches
+        .open(RUNTIME_CACHE)
+        .then((cache) => cache.keys());
+
+      const matchingRequest = keys.find((key) => {
+        const keyUrl = new URL(key.url);
+
+        return (
+          keyUrl.origin === baseUrl.origin &&
+          keyUrl.pathname === baseUrl.pathname &&
+          keyUrl.searchParams.has("_rsc")
+        );
+      });
+
+      if (matchingRequest) {
+        const rscCached = await caches.match(matchingRequest);
+        if (rscCached) return rscCached;
+      }
+    }
+
     if (isNavigation) {
       const offline = await caches.match(OFFLINE_URL);
-      if (offline) return offline;
+
+      if (offline) {
+        return offline;
+      }
     }
+
     throw new Error("sw-fetch-failed");
   }
 }
