@@ -1,9 +1,19 @@
 "use client";
 
 import { useEffect } from "react";
+import {
+  warmProductCache,
+  warmCategoryCache,
+  warmCustomerCache,
+  warmInvoiceCache,
+} from "@/lib/offline/cache";
+import { withTimeout } from "@/lib/offline/with-timeout";
+import { listProductsAction } from "@/lib/actions/products";
+import { listCategoriesAction } from "@/lib/actions/categories";
+import { listCustomersAction } from "@/lib/actions/customers";
+import { listInvoicesAction } from "@/lib/actions/invoices";
 
-// The offline-critical surface: pages that should keep opening with zero
-// network once the person has been online at least once this session.
+
 const OFFLINE_ROUTES = [
   "/dashboard",
   "/billing",
@@ -16,56 +26,139 @@ const OFFLINE_ROUTES = [
   "/plans",
 ];
 
-// Clicking a sidebar link does a *client-side* transition: Next.js fetches
-// just the RSC payload for the target route, tagged with router-specific
-// headers. The service worker caches that fine, but it is a different
-// cached response than what a hard reload or a brand-new tab asks for (a
-// plain, header-less GET, which is what a real browser navigation sends).
-// That mismatch is exactly why some pages worked offline and others didn't
-// after just clicking around: only pages reached via an actual reload had
-// the "real page" variant cached.
-//
-// A plain fetch() with no special headers gets that same real-page variant
-// a reload would, so calling it here for every core route - once per
-// session, and again whenever the connection comes back - is what makes
-// the service worker's cache complete regardless of how the person actually
-// navigated the app.
 async function warmRoutes() {
   if (!("serviceWorker" in navigator)) return;
+
   const registration = await navigator.serviceWorker.ready.catch(() => null);
   if (!registration) return;
 
   for (const route of OFFLINE_ROUTES) {
     try {
-      await fetch(route, { credentials: "same-origin", cache: "no-store" });
+      await fetch(route, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
     } catch {
-      // Genuinely offline (or this route is briefly unreachable) - stop
-      // rather than let every remaining route also fail one by one.
       break;
     }
   }
 }
 
-/**
- * Mounted once in AppShell (which stays mounted across client-side
- * navigation within the authenticated area), so this runs once per app
- * session rather than on every page change - plus again any time the
- * connection is restored after being offline.
- */
-export function OfflineRouteWarmer() {
+async function warmProductData(businessId: string) {
+  const result = await withTimeout(
+    listProductsAction({
+      search: "",
+      categoryId: undefined,
+      status: "all",
+      sortBy: "name",
+    }),
+    10000
+  );
+
+  if (!result.ok) {
+    throw new Error(result.error || "Failed to load products");
+  }
+
+  await warmProductCache(businessId, result.data);
+}
+
+async function warmCategoryData(businessId: string) {
+  const result = await withTimeout(
+    listCategoriesAction(),
+    10000
+  );
+
+  if (!result.ok) {
+    throw new Error(result.error || "Failed to load categories");
+  }
+
+  const categories = result.data.map((category) => ({
+    id: category.id,
+    name: category.name,
+    description: category.description,
+    parentId: category.parentId,
+    productCount: category._count.products,
+    childrenCount: category._count.children,
+  }));
+
+  await warmCategoryCache(businessId, categories);
+}
+
+async function warmCustomerData(businessId: string) {
+  const result = await withTimeout(
+    listCustomersAction(""),
+    10000
+  );
+
+  if (!result.ok) {
+    throw new Error(result.error || "Failed to load customers");
+  }
+
+  await warmCustomerCache(businessId, result.data);
+}
+
+async function warmInvoiceData(businessId: string) {
+  const result = await withTimeout(
+    listInvoicesAction({
+      search: "",
+    }),
+    10000
+  );
+
+  if (!result.ok) {
+    throw new Error(result.error || "Failed to load invoices");
+  }
+
+  const invoices = result.data.map((invoice) => ({
+    id: invoice.id,
+    invoiceNumber: invoice.invoiceNumber,
+    invoiceDate: new Date(invoice.invoiceDate).toISOString(),
+    customerNameSnapshot: invoice.customerNameSnapshot,
+    grandTotalMinor: invoice.grandTotalMinor,
+    paymentStatus: String(invoice.paymentStatus),
+    paymentMethod: String(invoice.paymentMethod),
+  }));
+
+  await warmInvoiceCache(businessId, invoices);
+}
+
+async function warmOfflineData(businessId: string) {
+  if (!navigator.onLine) return;
+
+  await Promise.allSettled([
+    warmProductData(businessId),
+    warmCategoryData(businessId),
+    warmCustomerData(businessId),
+    warmInvoiceData(businessId),
+  ]);
+}
+
+export function OfflineRouteWarmer({
+  businessId,
+}: {
+  businessId: string;
+}) {
   useEffect(() => {
     let cancelled = false;
+
     const run = () => {
-      if (!cancelled) void warmRoutes();
+      if (cancelled) return;
+
+      void warmRoutes();
+      void warmOfflineData(businessId);
     };
 
+    // Initial authenticated load
     run();
+
+    // Re-warm whenever connection comes back
     window.addEventListener("online", run);
+
     return () => {
       cancelled = true;
       window.removeEventListener("online", run);
     };
-  }, []);
+  }, [businessId]);
 
   return null;
 }

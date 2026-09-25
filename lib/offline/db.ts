@@ -18,7 +18,40 @@ export interface CachedCustomer {
   name: string;
   phone: string | null;
   email: string | null;
+  city: string | null;
   state: string | null;
+}
+
+export interface CachedCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  parentId: string | null;
+  productCount: number;
+  childrenCount: number;
+}
+
+export interface CachedTeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: "OWNER" | "STAFF";
+  isActive: boolean;
+  canViewAnalytics: boolean;
+  canManageProducts: boolean;
+  canManageCustomers: boolean;
+  canManageCategories: boolean;
+  canViewInvoiceHistory: boolean;
+}
+
+export interface CachedInvoiceSummary {
+  id: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  customerNameSnapshot: string | null;
+  grandTotalMinor: number;
+  paymentStatus: string;
+  paymentMethod: string;
 }
 
 /** Everything a receipt needs to render fully offline, with no further lookups. */
@@ -51,13 +84,17 @@ export interface OutboxInvoice {
 interface OfflineSchema extends DBSchema {
   products: { key: string; value: CachedProduct };
   customers: { key: string; value: CachedCustomer };
+  categories: { key: string; value: CachedCategory };
+  teamMembers: { key: string; value: CachedTeamMember };
+  invoices: { key: string; value: CachedInvoiceSummary };
   outbox: { key: string; value: OutboxInvoice; indexes: { "by-status": string } };
   meta: { key: string; value: unknown };
 }
 
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let dbPromise: Promise<IDBPDatabase<OfflineSchema>> | null = null;
 let openBusinessId: string | null = null;
+
 
 /**
  * Opens (or reuses) the IndexedDB connection for one business. Scoping the
@@ -72,6 +109,9 @@ export function getOfflineDb(businessId: string): Promise<IDBPDatabase<OfflineSc
     upgrade(db) {
       if (!db.objectStoreNames.contains("products")) db.createObjectStore("products", { keyPath: "id" });
       if (!db.objectStoreNames.contains("customers")) db.createObjectStore("customers", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("categories")) db.createObjectStore("categories", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("teamMembers")) db.createObjectStore("teamMembers", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("invoices")) db.createObjectStore("invoices", { keyPath: "id" });
       if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta");
       if (!db.objectStoreNames.contains("outbox")) {
         const store = db.createObjectStore("outbox", { keyPath: "localId" });
@@ -81,6 +121,7 @@ export function getOfflineDb(businessId: string): Promise<IDBPDatabase<OfflineSc
   });
   return dbPromise;
 }
+
 
 /** True if IndexedDB is usable at all (SSR, privacy modes, and old browsers can lack it). */
 export function isOfflineStorageAvailable(): boolean {

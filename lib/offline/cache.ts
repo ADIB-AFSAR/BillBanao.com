@@ -1,4 +1,13 @@
-import { getOfflineDb, isOfflineStorageAvailable, type CachedProduct, type CachedCustomer, type CachedBusinessInfo } from "./db";
+import {
+  getOfflineDb,
+  isOfflineStorageAvailable,
+  type CachedProduct,
+  type CachedCustomer,
+  type CachedBusinessInfo,
+  type CachedCategory,
+  type CachedTeamMember,
+  type CachedInvoiceSummary,
+} from "./db";
 
 export async function warmProductCache(businessId: string, products: CachedProduct[]): Promise<void> {
   if (!isOfflineStorageAvailable()) return;
@@ -9,6 +18,13 @@ export async function warmProductCache(businessId: string, products: CachedProdu
   await tx.done;
 }
 
+/** Full offline snapshot of products, for the Products list page - not the capped typeahead search used elsewhere. */
+export async function getCachedProducts(businessId: string): Promise<CachedProduct[]> {
+  if (!isOfflineStorageAvailable()) return [];
+  const db = await getOfflineDb(businessId);
+  return db.getAll("products");
+}
+
 export async function warmCustomerCache(businessId: string, customers: CachedCustomer[]): Promise<void> {
   if (!isOfflineStorageAvailable()) return;
   const db = await getOfflineDb(businessId);
@@ -16,6 +32,65 @@ export async function warmCustomerCache(businessId: string, customers: CachedCus
   await tx.store.clear();
   for (const c of customers) await tx.store.put(c);
   await tx.done;
+}
+
+/** Full offline snapshot of customers, for the Customers list page. */
+export async function getCachedCustomers(businessId: string): Promise<CachedCustomer[]> {
+  if (!isOfflineStorageAvailable()) return [];
+  const db = await getOfflineDb(businessId);
+  return db.getAll("customers");
+}
+
+export async function warmCategoryCache(businessId: string, categories: CachedCategory[]): Promise<void> {
+  if (!isOfflineStorageAvailable()) return;
+  const db = await getOfflineDb(businessId);
+  const tx = db.transaction("categories", "readwrite");
+  await tx.store.clear();
+  for (const c of categories) await tx.store.put(c);
+  await tx.done;
+}
+
+export async function getCachedCategories(businessId: string): Promise<CachedCategory[]> {
+  if (!isOfflineStorageAvailable()) return [];
+  const db = await getOfflineDb(businessId);
+  return db.getAll("categories");
+}
+
+/** Never pass passwordHash or any other credential-bearing field in here - this is client-side storage. */
+export async function warmTeamCache(businessId: string, members: CachedTeamMember[]): Promise<void> {
+  if (!isOfflineStorageAvailable()) return;
+  const db = await getOfflineDb(businessId);
+  const tx = db.transaction("teamMembers", "readwrite");
+  await tx.store.clear();
+  for (const m of members) await tx.store.put(m);
+  await tx.done;
+}
+
+export async function getCachedTeamMembers(businessId: string): Promise<CachedTeamMember[]> {
+  if (!isOfflineStorageAvailable()) return [];
+  const db = await getOfflineDb(businessId);
+  return db.getAll("teamMembers");
+}
+
+/**
+ * Only call this with an *unfiltered* result set (no search/date/status
+ * params) - it fully replaces the cache, and caching a filtered subset
+ * would make offline browsing silently show only part of the real list.
+ */
+export async function warmInvoiceCache(businessId: string, invoices: CachedInvoiceSummary[]): Promise<void> {
+  if (!isOfflineStorageAvailable()) return;
+  const db = await getOfflineDb(businessId);
+  const tx = db.transaction("invoices", "readwrite");
+  await tx.store.clear();
+  for (const inv of invoices) await tx.store.put(inv);
+  await tx.done;
+}
+
+export async function getCachedInvoices(businessId: string): Promise<CachedInvoiceSummary[]> {
+  if (!isOfflineStorageAvailable()) return [];
+  const db = await getOfflineDb(businessId);
+  const all = await db.getAll("invoices");
+  return all.sort((a, b) => (a.invoiceDate < b.invoiceDate ? 1 : -1));
 }
 
 export async function saveCachedBusinessInfo(businessId: string, info: CachedBusinessInfo): Promise<void> {

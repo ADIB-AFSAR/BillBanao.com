@@ -153,6 +153,7 @@ export async function createInvoiceAction(formData: unknown) {
 
       const created = await tx.invoice.create({
         data: {
+          invoiceDate: input.invoiceDate ? new Date(input.invoiceDate) : undefined,
           businessId: session.businessId,
           invoiceNumber,
           idempotencyKey: input.idempotencyKey ?? null,

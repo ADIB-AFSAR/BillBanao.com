@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Select, Badge } from "@/components/ui/primitives";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { OfflineListNotice, OfflineStaleBanner } from "@/components/layout/offline-list-notice";
+import { warmProductCache, getCachedProducts, warmCategoryCache, getCachedCategories } from "@/lib/offline/cache";
+import { withTimeout } from "@/lib/offline/with-timeout";
 import { formatMoney, UNIT_LABELS, formatPercent } from "@/lib/money";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { flattenCategoryTree, indentLabel } from "@/lib/category-tree";
@@ -30,7 +32,7 @@ type Product = {
   category: { id: string; name: string } | null;
 };
 
-export function ProductTable() {
+export function ProductTable({ businessId }: { businessId: string }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; parentId: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,23 +48,69 @@ export function ProductTable() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await listProductsAction({
+      const res = await withTimeout(
+      listProductsAction({
         search: debouncedSearch,
         categoryId: categoryId || undefined,
         status,
         sortBy,
-      });
-      if (res.ok) setProducts(res.data as unknown as Product[]);
+      }),
+      25000
+    );
+    if (!res.ok) throw new Error(res.error || "Request failed");
+
+        setProducts(res.data as unknown as Product[]);
+        // Only cache the unfiltered, default-sorted list - caching a
+        // filtered subset would make offline browsing silently show only
+        // part of the real catalog.
+        if (!debouncedSearch && !categoryId && status === "all" && sortBy === "name") {
+          void warmProductCache(
+            businessId,
+            (res.data as unknown as Product[]).map((p) => ({
+              id: p.id,
+              name: p.name,
+              sku: p.sku,
+              barcode: p.barcode,
+              unitPriceMinor: p.unitPriceMinor,
+              unit: p.unit,
+              gstRateBasisPoints: p.gstRateBasisPoints,
+              trackStock: p.trackStock,
+              stockQty: p.stockQty,
+              category: p.category ? { name: p.category.name } : null,
+            }))
+          );
+
+      }
       setOffline(false);
     } catch {
-      // The request never reached the server (no connection) - keep
-      // whatever was already loaded on screen and flag it as stale rather
-      // than spinning forever or wiping the list to empty.
+      // The request never reached the server (no connection). Fall back to
+      // whatever was last cached on this device rather than spinning
+      // forever or leaving the page blank - it won't reflect any filters,
+      // but it's real data instead of nothing.
+      const cached = await getCachedProducts(businessId);
+      if (cached.length > 0) {
+        setProducts(
+          cached.map((p) => ({
+            id: p.id,
+            name: p.name,
+            sku: p.sku,
+            barcode: p.barcode,
+            unitPriceMinor: p.unitPriceMinor,
+            unit: p.unit,
+            gstRateBasisPoints: p.gstRateBasisPoints,
+            trackStock: p.trackStock,
+            stockQty: p.stockQty,
+            lowStockThreshold: null,
+            isActive: true,
+            category: p.category ? { id: "", name: p.category.name } : null,
+          }))
+        );
+      }
       setOffline(true);
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, categoryId, status, sortBy]);
+  }, [debouncedSearch, categoryId, status, sortBy, businessId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-filter-change
@@ -77,15 +125,32 @@ export function ProductTable() {
   }, [load]);
 
   useEffect(() => {
-    listCategoriesAction()
+    withTimeout(listCategoriesAction(),25000)
       .then((res) => {
-        if (res.ok) setCategories(res.data);
+        if (!res.ok) {
+      throw new Error(res.error || "Request failed");
+    }
+          setCategories(res.data);
+          void warmCategoryCache(
+            businessId,
+            res.data.map((c) => ({
+              id: c.id,
+              name: c.name,
+              description: c.description,
+              parentId: c.parentId,
+              productCount: c._count.products,
+              childrenCount: c._count.children,
+            }))
+          );
       })
-      .catch(() => {
-        // Category filter just stays empty offline - not fatal, the main
-        // product list load() above handles its own offline state.
+      .catch(async () => {
+        // Fall back to the last cached category list for the filter
+        // dropdown - the main product list's own load() above handles its
+        // own offline state independently.
+        const cached = await getCachedCategories(businessId);
+        setCategories(cached.map((c) => ({ id: c.id, name: c.name, parentId: c.parentId })));
       });
-  }, []);
+  }, [businessId]);
 
   async function handleDelete() {
     if (!deleteTarget) return;

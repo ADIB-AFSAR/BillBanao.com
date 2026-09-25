@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { OfflineListNotice, OfflineStaleBanner } from "@/components/layout/offline-list-notice";
+import { warmCustomerCache, getCachedCustomers } from "@/lib/offline/cache";
+import { withTimeout } from "@/lib/offline/with-timeout";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { generateCustomersReportPdf } from "@/lib/reports/generate-customers-pdf";
 
@@ -24,9 +26,11 @@ type Customer = {
 export function CustomerTable({
   canExportPdf = false,
   businessName = "Business",
+  businessId,
 }: {
   canExportPdf?: boolean;
   businessName?: string;
+  businessId: string;
 }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,17 +43,39 @@ export function CustomerTable({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await listCustomersAction(debounced);
-      if (res.ok) setCustomers(res.data);
+      const res = await withTimeout(listCustomersAction(debounced));   
+      if (!res.ok) {
+      throw new Error(res.error || "Request failed");
+    }   
+        setCustomers(res.data);
+        // Only cache the unfiltered list - a search result is a subset,
+        // and caching it would make offline browsing silently show only
+        // whoever matched the last search typed before going offline.
+        if (!debounced) {
+          void warmCustomerCache(
+            businessId,
+            res.data.map((c) => ({
+              id: c.id,
+              name: c.name,
+              phone: c.phone,
+              email: c.email,
+              city: c.city,
+              state: c.state,
+            }))
+          );
+        }
       setOffline(false);
     } catch {
-      // Request never reached the server - keep whatever was already
-      // loaded rather than spinning forever or clearing the list.
+      // Request never reached the server - fall back to the last cached
+      // customer list on this device rather than spinning forever or
+      // leaving the page blank.
+      const cached = await getCachedCustomers(businessId);
+      if (cached.length > 0) setCustomers(cached);
       setOffline(true);
     } finally {
       setLoading(false);
     }
-  }, [debounced]);
+  }, [debounced, businessId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-filter-change

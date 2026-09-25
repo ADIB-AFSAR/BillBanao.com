@@ -8,6 +8,7 @@ import { CustomerForm } from "@/components/customers/customer-form";
 import { Input } from "@/components/ui/input";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { searchCachedCustomers } from "@/lib/offline/cache";
+import { withTimeout } from "@/lib/offline/with-timeout";
 
 export interface BillingCustomer {
   id: string;
@@ -36,13 +37,15 @@ export function CustomerPicker({
     if (!open) return;
     let cancelled = false;
 
-    listCustomersAction(debounced)
+    withTimeout(listCustomersAction(debounced), 4000)
       .then((res) => {
         if (cancelled) return;
-        if (res.ok) {
+        if (!res.ok) {
+          throw new Error(res.error || "Request failed");
+        }
           setResults(res.data);
           setFromCache(false);
-        }
+        
       })
       .catch(async () => {
         if (cancelled) return;

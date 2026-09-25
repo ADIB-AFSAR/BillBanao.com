@@ -20,6 +20,7 @@ import { useOnlineStatus } from "@/hooks/use-online-status";
 import { createInvoiceOnlineOrQueue } from "@/lib/offline/outbox";
 import { warmProductCache, warmCustomerCache, saveCachedBusinessInfo, decrementCachedStock } from "@/lib/offline/cache";
 import type { CachedBusinessInfo } from "@/lib/offline/db";
+import { createPortal } from "react-dom";
 
 export interface CartItem {
   key: string;
@@ -76,6 +77,63 @@ export function BillingScreen({
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [offlineReceipt, setOfflineReceipt] = useState<ReceiptData | null>(null);
+  const draftKey = `billing-draft-${businessId}`;
+
+  useEffect(() => {
+  if (prefillItems?.length) return;
+
+  const saved = sessionStorage.getItem(draftKey);
+  if (!saved) return;
+
+  try {
+    const draft = JSON.parse(saved);
+
+    setCart(draft.cart ?? []);
+    setCustomer(draft.customer ?? null);
+    setGstEnabled(draft.gstEnabled ?? settings.gstEnabledByDefault);
+    setBillDiscountType(draft.billDiscountType ?? "NONE");
+    setBillDiscountValue(draft.billDiscountValue ?? 0);
+    setPaymentMethod(draft.paymentMethod ?? "CASH");
+    setAmountPaidInput(draft.amountPaidInput ?? "");
+    setAmountPaidTouched(draft.amountPaidTouched ?? false);
+    setNotes(draft.notes ?? "");
+  } catch {
+    sessionStorage.removeItem(draftKey);
+  }
+}, [draftKey, prefillItems, settings.gstEnabledByDefault]);
+
+useEffect(() => {
+  if (cart.length === 0) {
+    sessionStorage.removeItem(draftKey);
+    return;
+  }
+
+  sessionStorage.setItem(
+    draftKey,
+    JSON.stringify({
+      cart,
+      customer,
+      gstEnabled,
+      billDiscountType,
+      billDiscountValue,
+      paymentMethod,
+      amountPaidInput,
+      amountPaidTouched,
+      notes,
+    })
+  );
+}, [
+  draftKey,
+  cart,
+  customer,
+  gstEnabled,
+  billDiscountType,
+  billDiscountValue,
+  paymentMethod,
+  amountPaidInput,
+  amountPaidTouched,
+  notes,
+]);
 
   useEffect(() => {
     if (prefillItems && prefillItems.length > 0) {
@@ -243,6 +301,7 @@ export function BillingScreen({
     setAmountPaidInput("");
     setBillDiscountType("NONE");
     setBillDiscountValue(0);
+    sessionStorage.removeItem(draftKey);
   }
 
   async function handleCheckout() {
@@ -277,6 +336,7 @@ export function BillingScreen({
           return;
         }
         toast.success(`Invoice ${outcome.result.data.invoiceNumber} saved.`);
+        resetBill();
         router.push(`/invoices/${outcome.result.data.id}`);
         return;
       }
@@ -286,7 +346,6 @@ export function BillingScreen({
       await Promise.all(cart.map((item) => decrementCachedStock(businessId, item.productId, item.quantity)));
       toast.success(`Saved offline as ${outcome.receipt.invoiceNumber} - it'll sync automatically once you're back online.`);
       setOfflineReceipt(outcome.receipt);
-      resetBill();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
@@ -295,12 +354,13 @@ export function BillingScreen({
   }
 
   return (
+    <>
     <div className="grid lg:grid-cols-[1fr_400px] h-[calc(100vh-3.5rem)]">
       <div className="overflow-y-auto p-4 sm:p-6 border-r border-paper-line">
         <ProductSearchPanel businessId={businessId} onAdd={addProduct} />
       </div>
 
-      <div className="flex flex-col bg-paper-raised overflow-hidden">
+      <div className="flex flex-col bg-paper-raised min-h-0 overflow-y-auto">
         <div className="px-4 sm:px-5 py-3 border-b border-paper-line flex items-center gap-2">
           <ShoppingCart className="size-4 text-ink-2" />
           <h2 className="text-sm font-semibold text-ink">Current Bill</h2>
@@ -311,7 +371,7 @@ export function BillingScreen({
           <CustomerPicker businessId={businessId} selected={customer} onSelect={setCustomer} />
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 sm:px-5">
+        <div className="px-4 sm:px-5">
           {cart.length === 0 ? (
             <div className="py-16 text-center">
               <Receipt className="size-8 text-slate/40 mx-auto mb-2" />
@@ -456,23 +516,35 @@ export function BillingScreen({
           </Button>
         </div>
       </div>
-
-      {offlineReceipt && (
-        <div className="fixed inset-0 z-50 bg-ink/40 flex items-start sm:items-center justify-center p-4 overflow-y-auto">
-          <div className="w-full max-w-2xl my-8">
-            <div className="no-print flex justify-end gap-2 mb-3">
-              <Button variant="outline" onClick={() => setOfflineReceipt(null)}>
-                <X className="size-4" /> Close
-              </Button>
-              <Button onClick={() => window.print()}>
-                <Printer className="size-4" /> Print
-              </Button>
-            </div>
-            <ReceiptView invoice={offlineReceipt} />
-          </div>
-        </div>
-      )}
     </div>
+    {offlineReceipt &&
+  createPortal(
+    <div className="fixed inset-0 z-[99999] bg-ink/40 overflow-y-auto">
+      <div className="min-h-full px-4 pb-8">
+        <div className="w-full max-w-2xl mx-auto pt-4">
+          
+          <div className="flex justify-end gap-2 mb-3 print:hidden">
+            <Button
+              variant="outline"
+              onClick={() => setOfflineReceipt(null)}
+            >
+              <X className="size-4" />
+              Close
+            </Button>
+
+            <Button onClick={() => window.print()}>
+              <Printer className="size-4" />
+              Print
+            </Button>
+          </div>
+
+          <ReceiptView invoice={offlineReceipt} />
+        </div>
+      </div>
+    </div>,
+    document.body
+  )}
+    </>
   );
 }
 

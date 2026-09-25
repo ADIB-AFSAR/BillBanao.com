@@ -21,7 +21,7 @@ export default async function TeamPage() {
       <p className="text-sm text-slate mb-6">
         Add staff logins and control exactly what each person can see and do.
       </p>
-      <TeamTable />
+      <TeamTable businessId={session.businessId} />
     </div>
   );
 }

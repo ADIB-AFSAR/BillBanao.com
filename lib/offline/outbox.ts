@@ -1,21 +1,50 @@
 import { getOfflineDb, isOfflineStorageAvailable, type OutboxInvoice } from "./db";
 import { createInvoiceAction } from "@/lib/actions/invoices";
+import { withTimeout } from "./with-timeout";
 import type { CreateInvoiceInput } from "@/schemas/invoice";
 import type { ReceiptData } from "@/components/receipt/receipt-view";
 
 /**
- * True for "the request never reached/returned from the server" - the only
- * case we should queue for later. A real server-side rejection (insufficient
- * stock, permission denied, validation error) must NOT be queued, or the
- * person would see a false "saved, will sync" message for a sale that's
- * actually invalid. fetch() rejects (throws) for network failures; a
- * completed request that the server answered, even with an error, resolves
- * normally instead - runAction() always returns {ok:false,...} rather than
- * throwing, so anything that reaches us as a thrown error here is a
- * connectivity failure, not a business-logic rejection.
+ * True when fetch() itself never got a response - a real connectivity
+ * failure between this browser and the server.
  */
 function isNetworkFailure(err: unknown): boolean {
-  return err instanceof TypeError || (err instanceof Error && /fetch|network|failed to fetch/i.test(err.message));
+  return (
+    err instanceof TypeError ||
+    (err instanceof Error && /fetch|network|failed to fetch|timed out/i.test(err.message))
+  );
+}
+
+/**
+ * The known, expected business-logic rejections createInvoiceAction (and
+ * runAction() itself) can return. These must be shown to the person
+ * immediately and never queued, or they'd see a false "saved, will sync"
+ * message for a sale that's actually invalid (insufficient stock, no
+ * permission, plan limit reached, etc).
+ *
+ * A response that does NOT match any of these is treated as an
+ * infrastructure problem instead: the server was reachable and answered,
+ * but couldn't actually do the work - most commonly because it, in turn,
+ * couldn't reach its own database. That's just as much a "we're offline
+ * from this sale's point of view" situation as fetch() throwing outright,
+ * so it gets queued the same way.
+ */
+const KNOWN_BUSINESS_REJECTIONS = [
+  /sign in to do that/i,
+  /account's access is currently paused/i,
+  /doesn't have permission/i,
+  /don't have access to that resource/i,
+  /fix the highlighted fields/i,
+  /already in use/i,
+  /business settings are missing/i,
+  /reached your plan's limit/i,
+  /could not be found/i,
+  /is not currently available for sale/i,
+  /insufficient stock/i,
+];
+
+function isBusinessRejection(error: string): boolean {
+  return KNOWN_BUSINESS_REJECTIONS.some((pattern) => pattern.test(error));
 }
 
 function shortId(): string {
@@ -23,35 +52,58 @@ function shortId(): string {
 }
 
 /**
- * Tries to create the invoice normally first. Only if that fails with a
- * network error does it fall back to queueing - so on a good connection
- * this behaves exactly like createInvoiceAction always did.
+ * Tries to create the invoice normally first. Only if that fails for a
+ * connectivity-shaped reason - either the request never reached the
+ * server, or it did but the server couldn't actually complete it - does
+ * it fall back to queueing. A real business rejection is never queued, so
+ * on a good connection this behaves exactly like createInvoiceAction
+ * always did.
  */
-export async function createInvoiceOnlineOrQueue(
+ export async function createInvoiceOnlineOrQueue(
   businessId: string,
   payload: CreateInvoiceInput,
   buildReceiptSnapshot: (clientInvoiceLabel: string) => ReceiptData
-): Promise<
-  | { mode: "online"; result: Awaited<ReturnType<typeof createInvoiceAction>> }
+): Promise <
+  | { mode: "online"; result: Awaited<ReturnType<typeof createInvoiceAction>> } 
   | { mode: "queued"; localId: string; receipt: ReceiptData }
 > {
-  try {
-    const result = await createInvoiceAction(payload);
-    return { mode: "online", result };
-  } catch (err) {
-    if (!isNetworkFailure(err) || !isOfflineStorageAvailable()) throw err;
+  const createdAt = Date.now();
+  let result: Awaited<ReturnType<typeof createInvoiceAction>> | undefined;
+  let caughtError: unknown;
 
+  try {
+    // Deliberately generous: createInvoiceAction's own server-side
+    // transaction can legitimately take close to 20s under load (see
+    // lib/actions/invoices.ts). This must stay well above that, or a slow
+    // but working connection would get wrongly queued as offline - which
+    // risks creating the same sale twice once the real response lands.
+    result = await withTimeout(createInvoiceAction(payload), 25000);
+  } catch (err) {
+    caughtError = err;
+  }
+
+  const shouldQueue =
+    caughtError !== undefined
+      ? isNetworkFailure(caughtError)
+      : result !== undefined && !result.ok && !isBusinessRejection(result.error);
+
+  if (!shouldQueue || !isOfflineStorageAvailable()) {
+    if (caughtError !== undefined) throw caughtError;
+    return { mode: "online", result: result! };
+  }
+
+  {
     const localId = crypto.randomUUID();
     const clientInvoiceLabel = `OFFLINE-${shortId()}`;
     const receipt = buildReceiptSnapshot(clientInvoiceLabel);
 
     const entry: OutboxInvoice = {
       localId,
-      createdAt: Date.now(),
+      createdAt,
       status: "pending",
       attempts: 0,
       clientInvoiceLabel,
-      payload: { ...payload, idempotencyKey: localId },
+      payload: { ...payload,invoiceDate: new Date(createdAt).toISOString(), idempotencyKey: localId },
       receiptSnapshot: receipt,
     };
 
@@ -99,7 +151,7 @@ export async function syncOutbox(businessId: string): Promise<{ synced: number; 
 
       await db.put("outbox", { ...item, status: "syncing" });
       try {
-        const result = await createInvoiceAction(item.payload as CreateInvoiceInput);
+        const result = await withTimeout(createInvoiceAction(item.payload as CreateInvoiceInput), 25000);
         if (result.ok) {
           const invoice = result.data as { id: string; invoiceNumber: string };
           await db.put("outbox", {
@@ -113,10 +165,11 @@ export async function syncOutbox(businessId: string): Promise<{ synced: number; 
           // invoice history like any other.
           await db.delete("outbox", item.localId);
           synced++;
-        } else {
-          // The server actually answered and rejected it (e.g. stock ran
-          // out before this device reconnected) - this is not a
-          // connectivity problem, so don't keep silently retrying it.
+        } else if (isBusinessRejection(result.error)) {
+          // The server actually answered and rejected it for a real
+          // business reason (e.g. stock ran out before this device
+          // reconnected) - this is not a connectivity problem, so don't
+          // keep silently retrying it.
           await db.put("outbox", {
             ...item,
             status: "failed",
@@ -124,6 +177,19 @@ export async function syncOutbox(businessId: string): Promise<{ synced: number; 
             lastError: result.error,
           });
           failed++;
+        } else {
+          // The server answered but couldn't do the work for a
+          // connectivity-shaped reason (most likely it couldn't reach its
+          // own database) - treat this the same as not being able to
+          // reach the server at all: leave it pending for the next sync.
+          await db.put("outbox", {
+            ...item,
+            status: "pending",
+            attempts: item.attempts + 1,
+            lastError: result.error,
+          });
+          failed++;
+          break; // connection is probably still bad - stop this pass, don't burn through retries
         }
       } catch (err) {
         // Still can't reach the server - leave it pending for the next sync.

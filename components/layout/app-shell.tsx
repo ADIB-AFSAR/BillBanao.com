@@ -57,7 +57,7 @@ export function AppShell({
         <main className="flex-1 min-w-0">{children}</main>
       </div>
       <SyncManager businessId={businessId} />
-      <OfflineRouteWarmer />
+      <OfflineRouteWarmer businessId={businessId}/>
     </div>
   );
 }

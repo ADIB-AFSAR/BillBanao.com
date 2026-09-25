@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { formatMoney, UNIT_LABELS } from "@/lib/money";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { searchCachedProducts } from "@/lib/offline/cache";
+import { withTimeout } from "@/lib/offline/with-timeout";
 
 export interface BillingProduct {
   id: string;
@@ -31,7 +32,7 @@ export function ProductSearchPanel({
   const [query, setQuery] = useState("");
   const debounced = useDebouncedValue(query, 150);
   const [results, setResults] = useState<BillingProduct[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [fromCache, setFromCache] = useState(false);
 
   useEffect(() => {
@@ -39,14 +40,15 @@ export function ProductSearchPanel({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional debounced search-on-change
     setLoading(true);
 
-    searchProductsForBillingAction(debounced)
+      withTimeout(searchProductsForBillingAction(debounced), 10000)
       .then((res) => {
         if (cancelled) return;
-        if (res.ok) {
-          setResults(res.data as unknown as BillingProduct[]);
-          setFromCache(false);
+        if (!res.ok) {
+          throw new Error(res.error || "Request failed");
         }
-        setLoading(false);
+          setResults(res.data as unknown as BillingProduct[]);
+          setFromCache(false);     
+          setLoading(false);
       })
       .catch(async () => {
         // The request never reached the server (offline/flaky connection) -

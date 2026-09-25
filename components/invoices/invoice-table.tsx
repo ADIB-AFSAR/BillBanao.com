@@ -8,11 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Select, Badge } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
 import { OfflineListNotice, OfflineStaleBanner } from "@/components/layout/offline-list-notice";
+import { warmInvoiceCache, getCachedInvoices } from "@/lib/offline/cache";
 import { formatMoney } from "@/lib/money";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useRouter } from "next/navigation";
 import { generateSalesReportPdf } from "@/lib/reports/generate-sales-pdf";
 import { toast } from "sonner";
+import { withTimeout } from "@/lib/offline/with-timeout";
 
 type Invoice = {
   id: string;
@@ -34,9 +36,11 @@ const STATUS_VARIANT: Record<string, "moss" | "amber" | "brick"> = {
 export function InvoiceTable({
   canExportPdf = false,
   businessName = "Business",
+  businessId,
 }: {
   canExportPdf?: boolean;
   businessName?: string;
+  businessId: string;
 }) {
   const router = useRouter();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -51,20 +55,63 @@ export function InvoiceTable({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await listInvoicesAction({
+      const res = await withTimeout(
+      listInvoicesAction({
         search: debounced,
         paymentStatus: status || undefined,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
-      });
-      if (res.ok) setInvoices(res.data as unknown as Invoice[]);
+      })
+      ,25000);
+      if (!res.ok) {
+      throw new Error(res.error || "Request failed");
+    }
+
+        const data = res.data as unknown as Invoice[];
+        setInvoices(data);
+        // Only cache the unfiltered list - a search/status/date filter is a
+        // subset, and caching it would make offline browsing silently show
+        // only whatever matched the last filter used before going offline.
+        if (!debounced && !status && !dateFrom && !dateTo) {
+          void warmInvoiceCache(
+            businessId,
+            data.map((inv) => ({
+              id: inv.id,
+              invoiceNumber: inv.invoiceNumber,
+              invoiceDate: new Date(inv.invoiceDate).toISOString(),
+              customerNameSnapshot: inv.customerNameSnapshot,
+              grandTotalMinor: inv.grandTotalMinor,
+              paymentStatus: inv.paymentStatus,
+              paymentMethod: inv.paymentMethod,
+            }))
+          );
+        }
+  
       setOffline(false);
     } catch {
+      // Request never reached the server - fall back to the last cached
+      // (unfiltered) invoice list on this device rather than spinning
+      // forever or leaving the page blank.
+      const cached = await getCachedInvoices(businessId);
+      if (cached.length > 0) {
+        setInvoices(
+          cached.map((inv) => ({
+            id: inv.id,
+            invoiceNumber: inv.invoiceNumber,
+            invoiceDate: inv.invoiceDate,
+            customerNameSnapshot: inv.customerNameSnapshot,
+            grandTotalMinor: inv.grandTotalMinor,
+            paymentStatus: inv.paymentStatus,
+            paymentMethod: inv.paymentMethod,
+            customer: inv.customerNameSnapshot ? { name: inv.customerNameSnapshot } : null,
+          }))
+        );
+      }
       setOffline(true);
     } finally {
       setLoading(false);
     }
-  }, [debounced, status, dateFrom, dateTo]);
+  }, [debounced, status, dateFrom, dateTo, businessId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-filter-change

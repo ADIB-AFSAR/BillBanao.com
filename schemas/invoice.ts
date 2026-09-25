@@ -26,6 +26,11 @@ export const createInvoiceSchema = z.object({
   paymentMethod: z.enum(["CASH", "UPI", "CARD", "BANK_TRANSFER", "OTHER"]),
   amountPaid: z.coerce.number().nonnegative(),
   notes: z.string().trim().max(1000).optional().or(z.literal("")),
+
+  // Set by the offline queue so the original bill creation time
+  // is preserved when the invoice eventually syncs.
+  invoiceDate: z.string().datetime().optional(),
+  
   // Set only by the offline-sync path (lib/offline/outbox.ts) so a retried
   // sync can never create a duplicate invoice. Omitted for normal online use.
   idempotencyKey: z.string().trim().max(100).optional(),

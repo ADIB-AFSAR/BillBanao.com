@@ -18,6 +18,8 @@ import { Input } from "@/components/ui/input";
 import { Label, Badge } from "@/components/ui/primitives";
 import { Dialog, ConfirmDialog } from "@/components/ui/dialog";
 import { OfflineListNotice, OfflineStaleBanner } from "@/components/layout/offline-list-notice";
+import { warmTeamCache, getCachedTeamMembers } from "@/lib/offline/cache";
+import { withTimeout } from "@/lib/offline/with-timeout";
 
 type TeamMember = {
   id: string;
@@ -29,7 +31,7 @@ type TeamMember = {
 
 const PERMISSION_KEYS = Object.keys(PERMISSION_LABELS) as (keyof StaffPermissions)[];
 
-export function TeamTable() {
+export function TeamTable({ businessId }: { businessId: string }) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
@@ -40,10 +42,37 @@ export function TeamTable() {
   async function load() {
     setLoading(true);
     try {
-      const res = await listTeamMembersAction();
-      if (res.ok) setMembers(res.data as unknown as TeamMember[]);
+      const res = await withTimeout(listTeamMembersAction());
+      if (!res.ok) {
+      throw new Error(res.error || "Request failed");
+    }
+
+        const data = res.data as unknown as TeamMember[];
+        setMembers(data);
+        // Never persist passwordHash (or anything else sensitive) to
+        // client-side storage - only the fields actually shown in this UI.
+        void warmTeamCache(
+          businessId,
+          data.map((m) => ({
+            id: m.id,
+            name: m.name,
+            email: m.email,
+            role: m.role,
+            isActive: m.isActive,
+            canViewAnalytics: m.canViewAnalytics,
+            canManageProducts: m.canManageProducts,
+            canManageCustomers: m.canManageCustomers,
+            canManageCategories: m.canManageCategories,
+            canViewInvoiceHistory: m.canViewInvoiceHistory,
+          }))
+        );
       setOffline(false);
     } catch {
+      // Request never reached the server - fall back to the last cached
+      // team list on this device rather than spinning forever or leaving
+      // the page blank.
+      const cached = await getCachedTeamMembers(businessId);
+      if (cached.length > 0) setMembers(cached);
       setOffline(true);
     } finally {
       setLoading(false);
@@ -51,13 +80,14 @@ export function TeamTable() {
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount
+    // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps -- intentional fetch-on-mount
     load();
   }, []);
 
   useEffect(() => {
     window.addEventListener("online", load);
     return () => window.removeEventListener("online", load);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load is redefined each render but reads current state via closure, which is what we want for a retry handler
   }, []);
 
   async function togglePermission(member: TeamMember, key: keyof StaffPermissions) {
