@@ -6,6 +6,7 @@ import { Topbar } from "./topbar";
 import { NotificationBanner } from "@/components/notifications/notification-banner";
 import { SyncManager } from "@/components/offline/sync-manager";
 import { OfflineRouteWarmer } from "@/components/offline/offline-route-warmer";
+import { OfflineNavigation } from "../offline/offline-navigation";
 
 const TITLES: { match: (p: string) => boolean; title: string }[] = [
   { match: (p) => p.startsWith("/dashboard"), title: "Dashboard" },
@@ -58,6 +59,7 @@ export function AppShell({
       </div>
       <SyncManager businessId={businessId} />
       <OfflineRouteWarmer businessId={businessId}/>
+      <OfflineNavigation/>
     </div>
   );
 }
