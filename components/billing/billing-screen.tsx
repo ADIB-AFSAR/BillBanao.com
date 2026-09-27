@@ -88,6 +88,7 @@ export function BillingScreen({
   try {
     const draft = JSON.parse(saved);
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-time restore of a saved draft bill on mount
     setCart(draft.cart ?? []);
     setCustomer(draft.customer ?? null);
     setGstEnabled(draft.gstEnabled ?? settings.gstEnabledByDefault);

@@ -37,6 +37,9 @@ yarn-error.log*
 # prisma generated client (created by `npx prisma generate`)
 /lib/generated
 
+# generated service worker (created by `npm run build`, see scripts/generate-sw.mjs)
+/public/sw.js
+
 # vercel
 .vercel
 

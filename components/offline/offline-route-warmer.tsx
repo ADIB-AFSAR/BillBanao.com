@@ -28,95 +28,37 @@ const OFFLINE_ROUTES = [
 let warmingRoutes = false;
 let warmingData = false;
 
+/**
+ * Asks the service worker to fetch and cache each route's real page HTML.
+ *
+ * All the JS/CSS a page needs is already precached at service-worker
+ * install time (see public/sw.template.js + scripts/generate-sw.mjs), so
+ * all that's left is each route's own server-rendered HTML - which,
+ * unlike the JS bundle, genuinely differs per business (it embeds this
+ * business's data) and so can't be baked in at build time.
+ *
+ * The actual cache.put happens inside the service worker (see the
+ * WARM_ROUTE message handler in sw.template.js), not here. That keeps the
+ * current cache name known in exactly one place - the worker itself -
+ * instead of this file having to hardcode a name that changes on every
+ * build.
+ */
 async function warmRoutes() {
   if (!navigator.onLine) return;
   if (!("serviceWorker" in navigator)) return;
-
-  // Prevent multiple route-warming jobs running at once.
   if (warmingRoutes) return;
 
   warmingRoutes = true;
-
   try {
-    const registration =
-      await navigator.serviceWorker.ready.catch(() => null);
-
-    if (!registration) return;
+    const registration = await navigator.serviceWorker.ready.catch(() => null);
+    const worker = registration?.active;
+    if (!worker) return;
 
     for (const route of OFFLINE_ROUTES) {
       if (!navigator.onLine) break;
-
-      try {
-        const response = await fetch(route, {
-          credentials: "same-origin",
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          continue;
-        }
-
-        /*
-         * Explicitly cache the route HTML.
-         *
-         * This is necessary because this fetch() is not a browser
-         * navigation request, so the service worker's navigation
-         * handler does not necessarily cache it for us.
-         */
-        try {
-          const cache = await caches.open("ledger-runtime-v3");
-
-          await cache.put(
-            new Request(
-              new URL(
-                route,
-                window.location.origin
-              ).toString()
-            ),
-            response.clone()
-          );
-        } catch {
-          // Cache failure should not prevent asset warming.
-        }
-
-        /*
-         * Read the HTML after cloning it for Cache Storage.
-         */
-        const html = await response.text();
-
-        /*
-         * Find Next.js static JS/CSS files referenced by this route.
-         */
-        const assets = Array.from(
-          html.matchAll(
-            /(?:src|href)=["'](\/_next\/static\/[^"']+)["']/g
-          )
-        ).map((match) => match[1]);
-
-        const uniqueAssets = [
-          ...new Set(assets),
-        ];
-
-        /*
-         * Fetch assets sequentially so we don't create a huge
-         * request burst.
-         */
-        for (const asset of uniqueAssets) {
-          if (!navigator.onLine) break;
-
-          try {
-            await fetch(asset, {
-              credentials: "same-origin",
-              cache: "no-store",
-            });
-          } catch {
-            // One asset failing should not stop the remaining assets.
-          }
-        }
-      } catch {
-        // One route failing should not stop the remaining routes.
-        continue;
-      }
+      worker.postMessage({ type: "WARM_ROUTE", url: route });
+      // Stagger slightly so this doesn't fire nine fetches in the same tick.
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
   } finally {
     warmingRoutes = false;
