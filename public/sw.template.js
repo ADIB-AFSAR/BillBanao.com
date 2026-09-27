@@ -31,8 +31,29 @@ self.addEventListener("install", (event) => {
       // Per-file, not cache.addAll(): addAll() fails its *entire* batch if
       // even one URL 404s, which would mean one renamed/missing asset
       // silently prevents every other asset - including offline.html -
-      // from ever getting precached.
-      await Promise.all([OFFLINE_URL, ...PRECACHE_ASSETS].map((url) => cache.add(url).catch(() => {})));
+      // from ever getting precached. But a failure here must still be
+      // VISIBLE - silently swallowing it is exactly what makes "some
+      // pages work offline, others crash with a missing chunk" impossible
+      // to diagnose. Check DevTools -> Application -> Service Workers ->
+      // "Inspect" (or the regular Console, while a page is loading) for
+      // this build's install log.
+      const results = await Promise.all(
+        [OFFLINE_URL, ...PRECACHE_ASSETS].map((url) =>
+          cache.add(url).then(
+            () => ({ url, ok: true }),
+            (err) => ({ url, ok: false, error: err instanceof Error ? err.message : String(err) })
+          )
+        )
+      );
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length > 0) {
+        console.error(
+          `[sw] build ${BUILD_ID}: FAILED to precache ${failed.length}/${results.length} asset(s) - these will only work offline if fetched successfully some other way first:`,
+          failed
+        );
+      } else {
+        console.log(`[sw] build ${BUILD_ID}: precached all ${results.length} asset(s).`);
+      }
     })()
   );
 });

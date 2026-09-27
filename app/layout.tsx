@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { ServiceWorkerRegister } from "@/components/pwa/sw-register";
+import { ChunkErrorRecovery } from "@/components/pwa/chunk-error-recovery";
 
 export const metadata: Metadata = {
   title: "BillBanao.com",
@@ -35,6 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col font-sans">
         <ServiceWorkerRegister />
+        <ChunkErrorRecovery />
         {children}
         <Toaster
           position="top-right"

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { WifiOff, AlertTriangle, RotateCw, Home } from "lucide-react";
+import { isChunkLoadError, reloadToRecoverChunk } from "@/components/pwa/chunk-error-recovery";
 
 /**
  * Never render error.message on the page - it can be a raw Prisma/network
@@ -29,28 +30,41 @@ export function ErrorFallback({
   }, [error]);
 
   const connectivity = isConnectivityError(error.message);
+  const chunkFailure = isChunkLoadError(error.message) || error.name === "ChunkLoadError";
 
   return (
     <div className="min-h-[60vh] grid place-items-center p-6">
       <div className="max-w-sm w-full text-center">
         <span
           className={`grid place-items-center size-12 rounded-full mx-auto mb-4 ${
-            connectivity ? "bg-amber/15 text-amber-dark" : "bg-brick-bg text-brick"
+            connectivity || chunkFailure ? "bg-amber/15 text-amber-dark" : "bg-brick-bg text-brick"
           }`}
         >
-          {connectivity ? <WifiOff className="size-5" /> : <AlertTriangle className="size-5" />}
+          {connectivity || chunkFailure ? <WifiOff className="size-5" /> : <AlertTriangle className="size-5" />}
         </span>
         <h1 className="text-lg font-semibold text-ink">
-          {connectivity ? "Can't reach the server" : "Something went wrong"}
+          {chunkFailure ? "Couldn't load a required file" : connectivity ? "Can't reach the server" : "Something went wrong"}
         </h1>
         <p className="text-sm text-slate mt-2">
-          {connectivity
-            ? `Check your internet connection and try again${context ? ` to load ${context}` : ""}.`
-            : "This page hit a problem loading. Trying again usually fixes it."}
+          {chunkFailure
+            ? "This usually means the connection dropped while a piece of the app was loading. Reloading almost always fixes it."
+            : connectivity
+              ? `Check your internet connection and try again${context ? ` to load ${context}` : ""}.`
+              : "This page hit a problem loading. Trying again usually fixes it."}
         </p>
         <div className="flex items-center justify-center gap-2 mt-6">
           <button
-            onClick={reset}
+            onClick={() => {
+              // React's reset() only re-renders the component tree - it
+              // can't retry a JS chunk the browser's module loader already
+              // gave up fetching. A real reload goes back through the
+              // service worker for another chance at whatever IS cached.
+              if (chunkFailure) {
+                reloadToRecoverChunk();
+              } else {
+                reset();
+              }
+            }}
             className="h-10 px-5 flex items-center gap-2 rounded-md bg-ink text-paper text-sm font-medium hover:bg-ink-2"
           >
             <RotateCw className="size-4" /> Try again
