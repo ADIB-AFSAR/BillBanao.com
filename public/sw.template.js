@@ -28,31 +28,53 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(STATIC_CACHE);
-      // Per-file, not cache.addAll(): addAll() fails its *entire* batch if
-      // even one URL 404s, which would mean one renamed/missing asset
-      // silently prevents every other asset - including offline.html -
-      // from ever getting precached. But a failure here must still be
-      // VISIBLE - silently swallowing it is exactly what makes "some
-      // pages work offline, others crash with a missing chunk" impossible
-      // to diagnose. Check DevTools -> Application -> Service Workers ->
-      // "Inspect" (or the regular Console, while a page is loading) for
-      // this build's install log.
-      const results = await Promise.all(
-        [OFFLINE_URL, ...PRECACHE_ASSETS].map((url) =>
-          cache.add(url).then(
-            () => ({ url, ok: true }),
-            (err) => ({ url, ok: false, error: err instanceof Error ? err.message : String(err) })
-          )
-        )
+      const urls = [OFFLINE_URL, ...PRECACHE_ASSETS];
+
+      // Deliberately NOT cache.add(url): it hides the actual response, so a
+      // failure only ever shows up as an opaque rejected promise. Fetching
+      // manually lets us log the real HTTP status, response type, and
+      // whether it was redirected - printed as individual, already-expanded
+      // console.error lines (not a collapsed array) so nothing needs to be
+      // clicked open to read it, on desktop or mobile DevTools.
+      let succeeded = 0;
+      let failed = 0;
+      let examplesLogged = 0;
+      const MAX_EXAMPLES = 8;
+
+      await Promise.all(
+        urls.map(async (url) => {
+          try {
+            const response = await fetch(url, { credentials: "same-origin" });
+            if (!response.ok) {
+              failed++;
+              if (examplesLogged < MAX_EXAMPLES) {
+                examplesLogged++;
+                console.error(
+                  `[sw] precache FAILED ${url} -> HTTP ${response.status} ${response.statusText} ` +
+                    `(type=${response.type}, redirected=${response.redirected})`
+                );
+              }
+              return;
+            }
+            await cache.put(url, response);
+            succeeded++;
+          } catch (err) {
+            failed++;
+            if (examplesLogged < MAX_EXAMPLES) {
+              examplesLogged++;
+              console.error(`[sw] precache FAILED ${url} -> threw: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+        })
       );
-      const failed = results.filter((r) => !r.ok);
-      if (failed.length > 0) {
+
+      if (failed > 0) {
         console.error(
-          `[sw] build ${BUILD_ID}: FAILED to precache ${failed.length}/${results.length} asset(s) - these will only work offline if fetched successfully some other way first:`,
-          failed
+          `[sw] build ${BUILD_ID}: FAILED to precache ${failed}/${urls.length} asset(s) - ` +
+            `${Math.min(examplesLogged, MAX_EXAMPLES)} example(s) logged above. These will only work offline if fetched successfully some other way first.`
         );
       } else {
-        console.log(`[sw] build ${BUILD_ID}: precached all ${results.length} asset(s).`);
+        console.log(`[sw] build ${BUILD_ID}: precached all ${succeeded} asset(s).`);
       }
     })()
   );
