@@ -34,7 +34,7 @@ export function AccessSuspendedScreen({
             : "This account has been suspended. Billing and other features are paused."}
         </p>
         <p className="text-sm text-slate mt-2">
-          Please contact whoever manages your Ledger subscription to resume access. Your data is
+          Please contact whoever manages your platform subscription to resume access. Your data is
           safe and nothing has been deleted.
         </p>
         <div className="flex items-center justify-center gap-2 mt-6">

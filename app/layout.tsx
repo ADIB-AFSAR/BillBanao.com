@@ -5,6 +5,7 @@ import { ServiceWorkerRegister } from "@/components/pwa/sw-register";
 import { ChunkErrorRecovery } from "@/components/pwa/chunk-error-recovery";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://billbanaodotcom.vercel.app"),
   title: "BillBanao.com",
   description: "Business billing, GST invoicing and receipts.",
   openGraph: {
@@ -30,7 +31,9 @@ export const metadata: Metadata = {
     images: ["/billbanao-og-image-v4.jpg"],
   },
 
-  icons: { apple: "/icons/apple-touch-icon.png" },
+  icons: { apple: "/icons/apple-touch-icon.png",
+        icon: "/icons/icon-192.png",
+   },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

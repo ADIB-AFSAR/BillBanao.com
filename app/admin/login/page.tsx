@@ -40,7 +40,7 @@ export default function AdminLoginPage() {
           <span className="grid place-items-center size-8 rounded-md bg-amber text-white">
             <ShieldCheck className="size-4" />
           </span>
-          <span className="font-semibold">Ledger — Platform Admin</span>
+          <span className="font-semibold">Billbanao.com — Platform Admin</span>
         </div>
         <div className="bg-paper-raised rounded-lg border border-white/10 p-6">
           <h1 className="text-lg font-semibold text-ink">Admin sign in</h1>

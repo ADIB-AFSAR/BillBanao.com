@@ -30,7 +30,7 @@ export function AdminTopbar({ adminName }: { adminName: string }) {
           <span className="grid place-items-center size-7 rounded-md bg-amber text-white">
             <ShieldCheck className="size-4" />
           </span>
-          <span className="hidden sm:inline">Ledger — Platform Admin</span>
+          <span className="hidden sm:inline">Billbanao.com — Platform Admin</span>
         </Link>
         <nav className="flex items-center gap-1 overflow-x-auto">
           {NAV_ITEMS.map((item) => {

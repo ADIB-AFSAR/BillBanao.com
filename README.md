@@ -1,4 +1,4 @@
-# Ledger — Business Billing & Receipt System
+# BillBanao.com — Business Billing & Receipt System
 
 A production-oriented billing/POS web app for small and medium businesses:
 add products, build a bill at a fast POS-style screen, apply GST correctly

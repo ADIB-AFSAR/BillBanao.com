@@ -91,7 +91,7 @@ export function Sidebar({
       </nav>
 
       <div className="px-5 py-4 border-t border-white/10 text-[11px] text-paper/40">
-        Ledger Billing · v1.0
+        Billbanao.com Billing · v1.0
       </div>
     </aside>
   );
