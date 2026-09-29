@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "/billbanao-og-image-v4.jpg",
+        url: "https://billbanaodotcom.vercel.app/billbanao-og-image-v4.jpg",
         width: 1200,
         height: 630,
         alt: "BillBanao.com",
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "BillBanao.com",
     description: "Business billing, GST invoicing and receipts.",
-    images: ["/billbanao-og-image-v4.jpg"],
+    images: ["https://billbanaodotcom.vercel.app/billbanao-og-image-v4.jpg"],
   },
 
   icons: { apple: "/icons/apple-touch-icon.png",
