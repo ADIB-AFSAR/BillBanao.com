@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/primitives";
 import { formatMoney } from "@/lib/money";
 import type { ReceiptData } from "@/components/receipt/receipt-view";
+import { formatDateTime } from "@/lib/dateTime";
 
 export function PendingSyncPanel({ businessId }: { businessId: string }) {
   const [items, setItems] = useState<OutboxInvoice[]>([]);
@@ -66,7 +67,7 @@ export function PendingSyncPanel({ businessId }: { businessId: string }) {
                 <p className="font-medium text-ink tabular">{item.clientInvoiceLabel}</p>
                 <p className="text-xs text-slate">
                   {receipt?.customerNameSnapshot ?? "Walk-in"} ·{" "}
-                  {new Date(item.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                  {formatDateTime(item.createdAt)}
                 </p>
                 {item.status === "failed" && item.lastError && (
                   <p className="flex items-center gap-1 text-xs text-brick mt-0.5">

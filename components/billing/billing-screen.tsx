@@ -245,10 +245,10 @@ useEffect(() => {
 
   const effectiveAmountPaidDisplay = amountPaidTouched ? amountPaidInput : (totals.grandTotalMinor / 100).toFixed(2);
 
-  function buildReceiptSnapshot(clientInvoiceLabel: string): ReceiptData {
+  function buildReceiptSnapshot(clientInvoiceLabel: string, createdAt: Date): ReceiptData {
     return {
       invoiceNumber: clientInvoiceLabel,
-      invoiceDate: new Date(),
+      invoiceDate: createdAt,
       customerNameSnapshot: customer?.name ?? "Walk-in Customer",
       gstApplied: gstEnabled,
       taxType,
@@ -347,6 +347,7 @@ useEffect(() => {
       await Promise.all(cart.map((item) => decrementCachedStock(businessId, item.productId, item.quantity)));
       toast.success(`Saved offline as ${outcome.receipt.invoiceNumber} - it'll sync automatically once you're back online.`);
       setOfflineReceipt(outcome.receipt);
+      resetBill()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {

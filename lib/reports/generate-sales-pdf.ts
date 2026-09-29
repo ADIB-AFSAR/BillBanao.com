@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { formatMoneyPlain } from "@/lib/money";
+import { formatDate } from "../dateTime";
 
 export interface SalesReportRow {
   invoiceNumber: string;
@@ -26,7 +27,7 @@ export function generateSalesReportPdf(businessName: string, rows: SalesReportRo
     head: [["Invoice #", "Date", "Customer", "Total", "Status"]],
     body: rows.map((r) => [
       r.invoiceNumber,
-      new Date(r.invoiceDate).toLocaleDateString("en-IN", { dateStyle: "medium" }),
+      formatDate(r.invoiceDate),
       r.customerName,
       formatMoneyPlain(r.grandTotalMinor),
       r.paymentStatus.replace("_", " "),

@@ -29,6 +29,8 @@ export const metadata: Metadata = {
     description: "Business billing, GST invoicing and receipts.",
     images: ["/billbanao-og-image-v4.jpg"],
   },
+
+  icons: { apple: "/icons/apple-touch-icon.png" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

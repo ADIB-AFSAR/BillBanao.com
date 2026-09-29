@@ -1,3 +1,4 @@
+import { formatDateTime } from "@/lib/dateTime";
 import { formatMoney, formatMoneyPlain, formatPercent, formatQty, UNIT_LABELS } from "@/lib/money";
 
 export interface ReceiptData {
@@ -89,10 +90,7 @@ export function ReceiptView({ invoice }: { invoice: ReceiptData }) {
           <p className="text-xs uppercase tracking-wide text-slate">Invoice</p>
           <p className="text-base font-bold tabular text-ink">{invoice.invoiceNumber}</p>
           <p className="text-xs text-slate mt-1 tabular">
-            {new Date(invoice.invoiceDate).toLocaleString("en-IN", {
-              dateStyle: "medium",
-              timeStyle: "short",
-            })}
+            {formatDateTime(invoice.invoiceDate)}
           </p>
         </div>
       </div>

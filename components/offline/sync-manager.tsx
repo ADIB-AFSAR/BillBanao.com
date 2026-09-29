@@ -6,10 +6,12 @@ import { CloudOff, RefreshCw, CloudUpload } from "lucide-react";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { pendingOutboxCount, syncOutbox } from "@/lib/offline/outbox";
 import { isOfflineStorageAvailable } from "@/lib/offline/db";
+import { useRouter } from "next/navigation";
 
 const RETRY_INTERVAL_MS = 45_000;
 
 export function SyncManager({ businessId }: { businessId: string }) {
+  const router = useRouter();
   const online = useOnlineStatus();
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -26,6 +28,7 @@ export function SyncManager({ businessId }: { businessId: string }) {
       const { synced, failed } = await syncOutbox(businessId);
       if (synced > 0) {
         toast.success(`Synced ${synced} offline bill${synced === 1 ? "" : "s"}.`);
+        router.refresh();
       }
       if (failed > 0) {
         // Only a genuinely rejected sale (not a connectivity retry) reaches
@@ -35,7 +38,7 @@ export function SyncManager({ businessId }: { businessId: string }) {
       setSyncing(false);
       refreshCount();
     }
-  }, [businessId, refreshCount, syncing]);
+  }, [businessId, refreshCount, syncing, router]);
 
   // Initial check on mount (e.g. bills queued in a previous session).
   useEffect(() => {

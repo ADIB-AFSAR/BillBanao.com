@@ -62,7 +62,7 @@ function shortId(): string {
  export async function createInvoiceOnlineOrQueue(
   businessId: string,
   payload: CreateInvoiceInput,
-  buildReceiptSnapshot: (clientInvoiceLabel: string) => ReceiptData
+  buildReceiptSnapshot: (clientInvoiceLabel: string, createdAt: Date) => ReceiptData
 ): Promise <
   | { mode: "online"; result: Awaited<ReturnType<typeof createInvoiceAction>> } 
   | { mode: "queued"; localId: string; receipt: ReceiptData }
@@ -95,7 +95,7 @@ function shortId(): string {
   {
     const localId = crypto.randomUUID();
     const clientInvoiceLabel = `OFFLINE-${shortId()}`;
-    const receipt = buildReceiptSnapshot(clientInvoiceLabel);
+    const receipt = buildReceiptSnapshot(clientInvoiceLabel, new Date(createdAt));
 
     const entry: OutboxInvoice = {
       localId,
@@ -127,6 +127,7 @@ export async function pendingOutboxCount(businessId: string): Promise<number> {
 }
 
 let syncing = false;
+export const OUTBOX_SYNCED_EVENT = "outbox-synced";
 
 /**
  * Processes the outbox strictly one at a time, in the order the bills were
@@ -137,6 +138,7 @@ let syncing = false;
  * serial processing avoids relying on that as the only safeguard).
  */
 export async function syncOutbox(businessId: string): Promise<{ synced: number; failed: number }> {
+  
   if (syncing || !isOfflineStorageAvailable()) return { synced: 0, failed: 0 };
   syncing = true;
   let synced = 0;
@@ -205,6 +207,9 @@ export async function syncOutbox(businessId: string): Promise<{ synced: number; 
     }
   } finally {
     syncing = false;
+  }
+  if (synced > 0 && typeof window !== "undefined") {
+   window.dispatchEvent(new CustomEvent(OUTBOX_SYNCED_EVENT));
   }
 
   return { synced, failed };

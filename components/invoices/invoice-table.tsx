@@ -15,6 +15,8 @@ import { useRouter } from "next/navigation";
 import { generateSalesReportPdf } from "@/lib/reports/generate-sales-pdf";
 import { toast } from "sonner";
 import { withTimeout } from "@/lib/offline/with-timeout";
+import { formatDateTime } from "@/lib/dateTime";
+import { OUTBOX_SYNCED_EVENT } from "@/lib/offline/outbox";
 
 type Invoice = {
   id: string;
@@ -120,7 +122,11 @@ export function InvoiceTable({
 
   useEffect(() => {
     window.addEventListener("online", load);
-    return () => window.removeEventListener("online", load);
+    window.addEventListener(OUTBOX_SYNCED_EVENT, load);
+    return () => {
+      window.removeEventListener("online", load);
+      window.removeEventListener(OUTBOX_SYNCED_EVENT, load);
+    };
   }, [load]);
 
   function handleExportPdf() {
@@ -209,7 +215,7 @@ export function InvoiceTable({
                   >
                     <td className="px-4 py-3 font-medium text-ink tabular">{inv.invoiceNumber}</td>
                     <td className="px-4 py-3 text-slate tabular">
-                      {new Date(inv.invoiceDate).toLocaleDateString("en-IN", { dateStyle: "medium" })}
+                      {formatDateTime(inv.invoiceDate)}
                     </td>
                     <td className="px-4 py-3 text-ink-2">{inv.customer?.name ?? inv.customerNameSnapshot ?? "Walk-in"}</td>
                     <td className="px-4 py-3 text-right tabular font-medium text-ink">
