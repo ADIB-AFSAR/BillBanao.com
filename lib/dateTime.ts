@@ -16,3 +16,10 @@ export function formatDate(value: DateInput): string {
     timeZone: APP_TIME_ZONE,
   });
 }
+
+export function formatTime(value: DateInput): string {
+  return new Date(value).toLocaleTimeString("en-IN", {
+    timeStyle: "short",
+    timeZone: APP_TIME_ZONE,
+  });
+}

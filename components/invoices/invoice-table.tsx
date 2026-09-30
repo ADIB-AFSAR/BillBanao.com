@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation";
 import { generateSalesReportPdf } from "@/lib/reports/generate-sales-pdf";
 import { toast } from "sonner";
 import { withTimeout } from "@/lib/offline/with-timeout";
-import { formatDateTime } from "@/lib/dateTime";
+import { formatDate, formatDateTime, formatTime } from "@/lib/dateTime";
 import { OUTBOX_SYNCED_EVENT } from "@/lib/offline/outbox";
 
 type Invoice = {
@@ -213,11 +213,12 @@ export function InvoiceTable({
                     className="border-b border-paper-line last:border-0 hover:bg-paper/60 cursor-pointer"
                     onClick={() => router.push(`/invoices/${inv.id}`)}
                   >
-                    <td className="px-4 py-3 font-medium text-ink tabular">{inv.invoiceNumber}</td>
-                    <td className="px-4 py-3 text-slate tabular">
-                      {formatDateTime(inv.invoiceDate)}
+                    <td className="px-4 py-3 font-medium text-ink tabular whitespace-nowrap">{inv.invoiceNumber}</td>
+                    <td className="px-4 py-3 text-slate tabular whitespace-nowrap">
+                    <div>{formatDate(inv.invoiceDate)}</div>
+                    <div className="text-xs text-slate/70">{formatTime(inv.invoiceDate)}</div>
                     </td>
-                    <td className="px-4 py-3 text-ink-2">{inv.customer?.name ?? inv.customerNameSnapshot ?? "Walk-in"}</td>
+                    <td className="px-4 py-3 text-ink-2 whitespace-nowrap">{inv.customer?.name ?? inv.customerNameSnapshot ?? "Walk-in"}</td>
                     <td className="px-4 py-3 text-right tabular font-medium text-ink">
                       {formatMoney(inv.grandTotalMinor)}
                     </td>
