@@ -211,33 +211,31 @@ export function OfflineRouteWarmer({
 }: {
   businessId: string;
 }) {
-  useEffect(() => {
+    useEffect(() => {
     let cancelled = false;
+    const KEY = `ledger-last-warm-${businessId}`;
+    const MIN_GAP_MS = 30 * 60 * 1000; // at most every 30 min on launch
 
-    const run = () => {
-      if (cancelled) return;
-      if (!navigator.onLine) return;
-
+    const run = (force: boolean) => {
+      if (cancelled || !navigator.onLine) return;
+      if (!force) {
+        const last = Number(localStorage.getItem(KEY) ?? 0);
+        if (Date.now() - last < MIN_GAP_MS) return;
+      }
+      localStorage.setItem(KEY, String(Date.now()));
       void warmRoutes();
       void warmOfflineData(businessId);
     };
 
-    // Initial authenticated load.
-    run();
-
-    // Re-warm when the connection comes back.
-    window.addEventListener(
-      "online",
-      run
-    );
+    // Wait until the app is usable before doing background work.
+    const timer = setTimeout(() => run(false), 10000);
+    const onOnline = () => run(true); // coming back online: always refresh
+    window.addEventListener("online", onOnline);
 
     return () => {
       cancelled = true;
-
-      window.removeEventListener(
-        "online",
-        run
-      );
+      clearTimeout(timer);
+      window.removeEventListener("online", onOnline);
     };
   }, [businessId]);
 

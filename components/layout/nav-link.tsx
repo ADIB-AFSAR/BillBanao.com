@@ -1,6 +1,6 @@
 "use client";
 
-import Link, { type LinkProps } from "next/link";
+import Link, { useLinkStatus, type LinkProps } from "next/link";
 import type {
   AnchorHTMLAttributes,
   MouseEvent,
@@ -14,6 +14,18 @@ type NavLinkProps = LinkProps &
   > & {
     children: ReactNode;
   };
+
+function PendingIndicator() {
+  const { pending } = useLinkStatus();
+  return (
+    <span
+      aria-hidden
+      className={`ml-auto size-3.5 shrink-0 rounded-full border-2 border-current border-t-transparent animate-spin transition-opacity duration-150 ${
+        pending ? "opacity-100 delay-100" : "opacity-0"
+      }`}
+    />
+  );
+}
 
 export function NavLink({
   href,
@@ -43,11 +55,12 @@ export function NavLink({
   return (
     <Link
       href={href}
-      prefetch={false}
+      // prefetch={false}
       onClick={handleClick}
       {...props}
     >
       {children}
+      <PendingIndicator/>
     </Link>
   );
 }
