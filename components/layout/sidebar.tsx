@@ -91,7 +91,7 @@ export function Sidebar({
       </nav>
 
       <div className="px-5 py-4 border-t border-white/10 text-[11px] text-paper/40">
-        Billbanao.com Billing · v1.0
+        Billbanao.com · v2.4
       </div>
     </aside>
   );

@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Billing App",          // your real app name
-    short_name: "Billing",
+    name:"Billbanao.com",
+    short_name: "Billbanao",
     start_url: "/billing",        // opens straight into the billing screen
     scope: "/",
     display: "standalone",        // no browser address bar, looks like a desktop app

@@ -6,12 +6,14 @@ import {
   warmCategoryCache,
   warmCustomerCache,
   warmInvoiceCache,
+  warmTeamCache,
 } from "@/lib/offline/cache";
 import { withTimeout } from "@/lib/offline/with-timeout";
 import { listProductsAction } from "@/lib/actions/products";
 import { listCategoriesAction } from "@/lib/actions/categories";
 import { listCustomersAction } from "@/lib/actions/customers";
 import { listInvoicesAction } from "@/lib/actions/invoices";
+import { listTeamMembersAction } from "@/lib/actions/team";
 
 const OFFLINE_ROUTES = [
   "/dashboard",
@@ -200,6 +202,7 @@ async function warmOfflineData(
       warmCategoryData(businessId),
       warmCustomerData(businessId),
       warmInvoiceData(businessId),
+      warmTeamData(businessId),
     ]);
   } finally {
     warmingData = false;
@@ -241,4 +244,44 @@ export function OfflineRouteWarmer({
   }, [businessId]);
 
   return null;
+}
+
+type TeamRow = {
+  id: string;
+  name: string;
+  email: string;
+  role: "OWNER" | "STAFF";
+  isActive: boolean;
+  canViewAnalytics: boolean;
+  canManageProducts: boolean;
+  canManageCustomers: boolean;
+  canManageCategories: boolean;
+  canViewInvoiceHistory: boolean;
+};
+
+async function warmTeamData(businessId: string) {
+  const result = await withTimeout(listTeamMembersAction(), 10000);
+
+  if (!result.ok) {
+    throw new Error(result.error || "Failed to load team");
+  }
+
+  const members = result.data as unknown as TeamRow[];
+
+  // Only the fields shown in the UI. Never store passwordHash or anything else sensitive.
+  await warmTeamCache(
+    businessId,
+    members.map((m) => ({
+      id: m.id,
+      name: m.name,
+      email: m.email,
+      role: m.role,
+      isActive: m.isActive,
+      canViewAnalytics: m.canViewAnalytics,
+      canManageProducts: m.canManageProducts,
+      canManageCustomers: m.canManageCustomers,
+      canManageCategories: m.canManageCategories,
+      canViewInvoiceHistory: m.canViewInvoiceHistory,
+    }))
+  );
 }
